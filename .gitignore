@@ -1,0 +1,63 @@
+# ==========================================
+# General & System
+# ==========================================
+.DS_Store
+*.pem
+.vscode/
+.idea/
+
+# Environment files (API Keys & Secrets)
+.env
+.env*.local
+!.env.example
+
+# ==========================================
+# Frontend (Next.js / Node)
+# ==========================================
+# Ignore node_modules anywhere in the repo
+node_modules/
+.pnp
+.pnp.*
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js build & output directories
+.next/
+out/
+build/
+coverage/
+.vercel/
+
+# TypeScript & Debug logs
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ==========================================
+# Backend (Python / FastAPI / LangGraph)
+# ==========================================
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Database files (if using local SQLite for dev)
+*.db
+*.sqlite3

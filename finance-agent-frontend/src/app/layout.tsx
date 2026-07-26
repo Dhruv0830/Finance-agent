@@ -1,10 +1,14 @@
 // src/app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
+import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "FinanceAgent AI",
   description: "Autonomous Stock Analysis Powered by AI",
+  icons: {
+    icon: "/icon.jpg", // or /favicon.ico
+  },
 };
 
 export default function RootLayout({
@@ -13,9 +17,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-neutral-950 text-neutral-100 antialiased">
-        {children}
+    <html lang="en" suppressHydrationWarning>
+      <body className="antialiased transition-colors duration-200">
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

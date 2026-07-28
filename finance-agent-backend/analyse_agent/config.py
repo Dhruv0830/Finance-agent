@@ -1,16 +1,20 @@
 from langchain.chat_models import init_chat_model
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
-from dotenv import load_dotenv
 import os
 
-load_dotenv()
+DEFAULT_RECURSION_LIMIT = 15
 
-config = {
-    "recursion_limit": 15,
-    "configurable": {
-        "thread_id": "5"
+def get_graph_config(user_id: str, thread_id: str) -> dict:
+    """
+    Generates a unique LangGraph configuration dictionary for a given user session.
+    """
+    return {
+        "recursion_limit": DEFAULT_RECURSION_LIMIT,
+        "configurable": {
+            # Standard composite key pattern: combines user and session
+            "thread_id": f"{user_id}:{thread_id}"
         }
-}
+    }
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

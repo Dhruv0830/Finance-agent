@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
+from analyse_agent.checkpointer import get_postgres_checkpointer
 from .schemas import AgentState
 from .nodes import (
     stock_search_node, ask_human_node, india_tools, us_tools, india_fundamental, india_X_reddit,
@@ -85,16 +85,7 @@ builder.add_conditional_edges(
 
 builder.add_edge("adjust_confidence_weights","orchestrator")
 builder.add_edge("action_payload","send_action_json")
-
-#Building the graph
-checkpointer = InMemorySaver()
-finance_graph = builder.compile(checkpointer = checkpointer)
-
-try:
-    with open("./finance_graph.png", "wb") as f:
-        f.write(finance_graph.get_graph(xray=True).draw_mermaid_png())
-    print("Graph saved to graph.png!")
     
-except Exception as e:
-    print("Error while saving the agent graph png", e)
-    
+async def get_finance_graph():
+    checkpointer = await get_postgres_checkpointer()
+    return builder.compile(checkpointer=checkpointer)

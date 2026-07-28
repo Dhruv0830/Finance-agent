@@ -614,6 +614,7 @@ def action_payload(state: AgentState) -> dict:
   ticker = state.user_choice.ticker or "NOT_FOUND"
   orchestrator_summary = state.orchestrator_summary or "NOT_FOUND"
   quant_weight = state.quant_weight or 0.5
+  source_citations = state.source_citations
   social_weight = state.social_weight or 0.5
   dissonance_score = state.dissonance_score or 0
 
@@ -648,7 +649,8 @@ def action_payload(state: AgentState) -> dict:
           "weights_applied": {
               "quantitative": quant_weight,
               "social": social_weight
-          }
+          },
+          "source_citations": []
       }
     else:
       # Convert Pydantic object to dictionary and append applied weights
@@ -656,6 +658,9 @@ def action_payload(state: AgentState) -> dict:
       payload_dict["weights_applied"] = {
           "quantitative": quant_weight,
           "social": social_weight
+      }
+      payload_dict["source_citations"] = {
+        source_citations
       }
 
   print(f"✅ Action Payload Generated: {payload_dict['action']} for {payload_dict['ticker']} (Confidence: {payload_dict['confidence_score']})")

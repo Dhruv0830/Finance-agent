@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, START, END
-from analyse_agent.checkpointer import get_postgres_checkpointer
+from analyse_agent.db import get_checkpointer
 from .schemas import AgentState
 from .nodes import (
     stock_search_node, ask_human_node, india_tools, us_tools, india_fundamental, india_X_reddit,
@@ -87,5 +87,5 @@ builder.add_edge("adjust_confidence_weights","orchestrator")
 builder.add_edge("action_payload","send_action_json")
     
 async def get_finance_graph():
-    checkpointer = await get_postgres_checkpointer()
+    checkpointer = await get_checkpointer()
     return builder.compile(checkpointer=checkpointer)

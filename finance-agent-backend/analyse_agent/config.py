@@ -4,7 +4,7 @@ import os
 
 DEFAULT_RECURSION_LIMIT = 15
 
-def get_graph_config(user_id: str, thread_id: str) -> dict:
+def get_graph_config(thread_id: str) -> dict:
     """
     Generates a unique LangGraph configuration dictionary for a given user session.
     """
@@ -12,7 +12,7 @@ def get_graph_config(user_id: str, thread_id: str) -> dict:
         "recursion_limit": DEFAULT_RECURSION_LIMIT,
         "configurable": {
             # Standard composite key pattern: combines user and session
-            "thread_id": f"{user_id}:{thread_id}"
+            "thread_id": thread_id
         }
     }
 

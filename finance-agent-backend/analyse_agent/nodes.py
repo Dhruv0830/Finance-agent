@@ -6,14 +6,14 @@ from langgraph.types import Command
 from langchain_core.messages import HumanMessage, AIMessage
 import json
 from langchain_tavily import TavilySearch
-from .config import analysis_model as model
-from .tools import tools
-from .schemas import (
+from config import analysis_model as model
+from tools import tools
+from schemas import (
   AgentState, AgentInput, SocialMomentumAnalysis,
   StructuredCompanyListings, OrchestratorOutput,
   QuantitativeValuationAnalysis, InvestmentActionPayload
 )
-from .prompts import (
+from prompts import (
   PROMPT, SOCIAL_MOMENTUM_ANALYST_PROMPT, ORCHESTRATOR_PROMPT, QUANTITATIVE_VALUATION_PROMPT, ACTION_PAYLOAD_PROMPT,
 )
 

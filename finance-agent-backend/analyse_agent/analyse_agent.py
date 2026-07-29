@@ -2,7 +2,7 @@
 import json
 from typing import AsyncGenerator
 from langgraph.types import Command
-from .builder import get_finance_graph  # Function that returns uncompiled StateGraph
+from builder import get_finance_graph  # Function that returns uncompiled StateGraph
 
 async def run_finance_analysis(input_data: dict, config: dict) -> AsyncGenerator[dict, None]:
     """

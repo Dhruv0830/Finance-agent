@@ -1,8 +1,8 @@
-# db.py
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from contextlib import asynccontextmanager
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -14,6 +14,7 @@ checkpointer: Optional[AsyncPostgresSaver] = None
 
 def get_db_uri() -> str:
     uri = os.getenv("DATABASE_URL")
+    print("THis is DB URL", uri)
     if not uri:
         raise RuntimeError("DATABASE_URL environment variable is not set.")
     return uri
@@ -31,33 +32,31 @@ async def lifespan(app: FastAPI):
     # 1. Initialize shared connection pool
     pool = AsyncConnectionPool(
         conninfo=get_db_uri(),
-        max_size=20,
-        kwargs={"autocommit": True}
+        max_size=8,
+        kwargs={"autocommit": True},
+        open=False
     )
+    
+    print("Setup done now opening the pool", pool)
     await pool.open()
 
     # 2. Initialize LangGraph checkpointer using the same pool
     checkpointer = AsyncPostgresSaver(pool)
-    await checkpointer.setup()  # Runs setup DDL queries once to ensure tables exist
-
-    yield  # FastAPI runs here
+    await checkpointer.setup()
+    print("checkpointer added", checkpointer)
+    yield  # Application running
 
     # 3. Cleanup connection pool on application shutdown
     await pool.close()
 
 
 def get_checkpointer() -> AsyncPostgresSaver:
-    """
-    Returns the initialized LangGraph AsyncPostgresSaver instance.
-    Use this when compiling your LangGraph workflow: graph.compile(checkpointer=get_checkpointer())
-    """
     if checkpointer is None:
         raise RuntimeError("Checkpointer is not initialized. Ensure FastAPI lifespan has started.")
     return checkpointer
 
 
 async def get_pool() -> AsyncConnectionPool:
-    """Returns the shared connection pool for raw application queries."""
     if pool is None:
         raise RuntimeError("Database connection pool is not initialized. Ensure FastAPI lifespan has started.")
     return pool
@@ -70,12 +69,7 @@ async def create_thread_and_initial_message(
     user_id: str,
     prompt: str,
     mode: str = "ANALYSE"
-):
-    """
-    Atomically creates the thread record (ticker='PENDING') and stores 
-    the first human prompt before starting LangGraph execution.
-    Returns the auto-generated thread_id.
-    """
+) -> str:
     p = await get_pool()
     async with p.connection() as conn:
         async with conn.transaction():
@@ -90,7 +84,7 @@ async def create_thread_and_initial_message(
             )
             
             row = await result.fetchone()
-            thread_id = str(row[0])  # Convert UUID object or string to str
+            thread_id = str(row["id"] if isinstance(row, dict) else row[0])
 
             # 2. Insert First User Message
             user_msg_content = {"type": "human", "text": prompt}
@@ -111,20 +105,23 @@ async def create_thread_and_initial_message(
 async def update_thread_and_log_resume_input(
     thread_id: str,
     user_id: str,
-    resume_payload: Dict[str, Any],
+    resume_payload: Union[Dict[str, Any], Any],
     node_name: str = "hitl_node"
 ) -> bool:
-    """
-    Atomically validates thread ownership, updates ticker and title,
-    and logs the user's resume response (e.g., approval/modifications).
-    """
-    ticker = resume_payload.ticker
+    # Safely extract ticker and serialize content regardless of dict or Pydantic model
+    if isinstance(resume_payload, dict):
+        ticker = resume_payload.get("ticker", "PENDING")
+        payload_json = json.dumps(resume_payload)
+    else:
+        ticker = getattr(resume_payload, "ticker", "PENDING")
+        payload_json = resume_payload.model_dump_json() if hasattr(resume_payload, "model_dump_json") else json.dumps(resume_payload.__dict__)
+
     title = f"Analyse {ticker} stock" 
     
     p = await get_pool()
     async with p.connection() as conn:
         async with conn.transaction():
-            # 1. Update Thread Ticker & Title (Enforce user_id ownership)
+            # 1. Update Thread Ticker & Title
             result = await conn.execute(
                 """
                 UPDATE public.threads 
@@ -136,7 +133,7 @@ async def update_thread_and_log_resume_input(
             )
             row = await result.fetchone()
             if not row:
-                return False  # Thread does not exist or user is unauthorized
+                return False  # Thread not found or unauthorized
 
             # 2. Log Human Feedback/Approval Message
             await conn.execute(
@@ -144,7 +141,7 @@ async def update_thread_and_log_resume_input(
                 INSERT INTO public.thread_messages (thread_id, role, node_name, content, created_at)
                 VALUES (%s, 'user', %s, %s::jsonb, NOW());
                 """,
-                (thread_id, node_name, json.dumps(resume_payload))
+                (thread_id, node_name, payload_json)
             )
             return True
 
@@ -158,10 +155,6 @@ async def record_thread_message(
     content: Dict[str, Any],
     node_name: Optional[str] = None
 ):
-    """
-    Atomically writes node execution outputs, final investment report, 
-    or error logs into thread_messages, updating parent thread timestamp.
-    """
     p = await get_pool()
     async with p.connection() as conn:
         async with conn.transaction():
@@ -178,3 +171,62 @@ async def record_thread_message(
                 """,
                 (thread_id,)
             )
+
+
+# =====================================================================
+# STEP 4: CHANGE THREAD MODE TO CHAT
+# =====================================================================
+async def complete_thread_analysis(thread_id: str, ticker: Optional[str] = None):
+    p = await get_pool()
+    async with p.connection() as conn:
+        if ticker:
+            await conn.execute(
+                """
+                UPDATE public.threads 
+                SET mode = 'CHAT', ticker = %s, updated_at = NOW()
+                WHERE id = %s;
+                """,
+                (ticker, thread_id)
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE public.threads 
+                SET mode = 'CHAT', updated_at = NOW()
+                WHERE id = %s;
+                """,
+                (thread_id,)
+            )
+
+
+# =====================================================================
+# FETCH USER THREADS
+# =====================================================================
+async def get_user_threads(user_id: str) -> list[dict]:
+    p = await get_pool()
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT 
+                    id AS thread_id,
+                    ticker,
+                    title,
+                    mode,
+                    created_at,
+                    updated_at
+                FROM public.threads
+                WHERE user_id = %s
+                ORDER BY updated_at DESC;
+                """,
+                (user_id,)
+            )
+            rows = await cur.fetchall()
+            
+            for row in rows:
+                if row.get("created_at"):
+                    row["created_at"] = row["created_at"].isoformat()
+                if row.get("updated_at"):
+                    row["updated_at"] = row["updated_at"].isoformat()
+                    
+            return rows

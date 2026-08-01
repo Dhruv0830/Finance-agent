@@ -6,21 +6,14 @@ from langgraph.types import Command
 from langchain_core.messages import HumanMessage, AIMessage
 import json
 from langchain_tavily import TavilySearch
-from config import analysis_model as model
-from tools import tools
-from schemas import (
-  AgentState, AgentInput, SocialMomentumAnalysis,
-  StructuredCompanyListings, OrchestratorOutput,
-  QuantitativeValuationAnalysis, InvestmentActionPayload
-)
-from prompts import (
-  PROMPT, SOCIAL_MOMENTUM_ANALYST_PROMPT, ORCHESTRATOR_PROMPT, QUANTITATIVE_VALUATION_PROMPT, ACTION_PAYLOAD_PROMPT,
-)
-
+from .tools import tool_array
+from .prompts import *
+from .config import analysis_model, chat_model
+from .schemas import *
 
 #Bind Tools
 
-model_with_tools = model.bind_tools(tools)
+model_with_tools = analysis_model.bind_tools(tool_array)
 
 #Add structured output
 
@@ -438,7 +431,7 @@ def social_momentum_analyst(state: AgentState) -> dict:
         }
     }
 
-  structured_llm = model.with_structured_output(SocialMomentumAnalysis)
+  structured_llm = analysis_model.with_structured_output(SocialMomentumAnalysis)
 
   # 2. Attach .with_retry() to the structured runnable second
   social_llm = structured_llm.with_retry(
@@ -492,7 +485,7 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
 
   final_md = state.standardized_fundamentals['price_history'] + "\n\n" + state.standardized_fundamentals['financial_statements'] + "\n\n" + state.standardized_fundamentals['key_ratios']
 
-  structured_llm = model.with_structured_output(QuantitativeValuationAnalysis)
+  structured_llm = analysis_model.with_structured_output(QuantitativeValuationAnalysis)
 
   # 2. Attach .with_retry() to the structured runnable second
   quant_llm = structured_llm.with_retry(

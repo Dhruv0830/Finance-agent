@@ -3,6 +3,15 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/src/lib/supabase";
 import { useRouter } from "next/navigation";
+import {
+  FinalReportCard,
+  FinalReportData,
+} from "@/src/components/FinalReportCard";
+import {
+  AgentGraph,
+  NodeStatus,
+  ChoiceOption,
+} from "@/src/components/AgentGraph";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import {
@@ -10,9 +19,8 @@ import {
   Sun,
   Moon,
   Plus,
-  Search,
-  Clock,
   ChevronDown,
+  ChevronRight,
   User,
   Settings,
   LogOut,
@@ -20,45 +28,31 @@ import {
   HelpCircle,
   Menu,
   X,
+  FileText,
+  MessageSquare,
+  ArrowDown,
 } from "lucide-react";
+import { UserThreads, ThreadWithColor, Thread } from "../profile/page";
+import { convertSegmentPathToStaticExportFilename } from "next/dist/shared/lib/segment-cache/segment-value-encoding";
 
-const demoRecentAnalyses = [
-  {
-    id: "1",
-    title: "NVDA earnings outlook",
-    time: "1h ago",
-    snippet: "Bullish momentum heading into Q2...",
-    ticker: "NVDA",
-    color:
-      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  },
-  {
-    id: "2",
-    title: "AAPL vs MSFT comparison",
-    time: "1d ago",
-    snippet: "Both showing resilience but...",
-    ticker: "AAPL",
-    color:
-      "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700",
-  },
-  {
-    id: "3",
-    title: "SPY macro analysis",
-    time: "2d ago",
-    snippet: "Macro headwinds persist, watch...",
-    ticker: "SPY",
-    color: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
-  },
-];
+const GRAPH_NODES: Record<string, string> = {
+  stock_search_node: "1. Extract Ticker",
+  ask_human_node: "2. Human Validation",
 
-interface RecentAnalysis {
-  id: string;
-  title: string;
-  time: string;
-  snippet: string;
-  ticker: string;
-  color: string;
-}
+  india_fundamental: "3. Market Analysis",
+  india_X_reddit: "4. Social Buzz",
+  us_fundamental: "3. Market Analysis",
+  us_X_reddit: "4. Social Buzz",
+
+  state_consolidation: "5. Aggregating Data",
+  social_momentum_analyst: "6. Social Momentum Analyst",
+
+  quantitative_valuation_analyst: "7. Quantitative Valuation Analyst",
+
+  orchestrator: "8. Aggregating Results",
+
+  action_payload: "9. Generating Verdict",
+};
 
 export default function AnalyseDashboard() {
   const [user, setUser] = useState<any>(null);
@@ -66,15 +60,29 @@ export default function AnalyseDashboard() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showSideBar, setShowSideBar] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [activeThread, setActiveThread] = useState<string | null>(null);
-  const [recentAnalyses, setRecentAnalyses] =
-    useState<RecentAnalysis[]>(demoRecentAnalyses);
-  const [filteredAnalyses, setFilteredAnalyses] =
-    useState<RecentAnalysis[]>(demoRecentAnalyses);
-
   const supabase = createClient();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
+
+  // Workspace UI transitions
+  const [hasStarted, setHasStarted] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [finalReport, setFinalReport] = useState<FinalReportData | null>(null);
+  const [isGraphExpanded, setIsGraphExpanded] = useState(true);
+  const [isReportExpanded, setIsReportExpanded] = useState(true);
+  const [showChatFloater, setShowChatFloater] = useState(false);
+
+  // Endpoint Routing Mode: 'analyse' vs 'chat'
+  const [activeEndpoint, setActiveEndpoint] = useState<"analyse" | "chat">(
+    "analyse",
+  );
+
+  // State typed as ChoiceOption[]
+  const [hitlChoices, setHitlChoices] = useState<ChoiceOption[] | null>(null);
+
+  // Data State
+  const [nodes, setNodes] = useState<NodeStatus[]>([]);
+  const [streamText, setStreamText] = useState("");
 
   const metadata = user?.user_metadata || {};
   const avatarUrl = metadata.avatar_url || metadata.picture || null;
@@ -102,25 +110,259 @@ export default function AnalyseDashboard() {
     router.replace("/login");
   };
 
-  const handleSearch = (query: string) => {
-    if (!query) {
-      setFilteredAnalyses(recentAnalyses);
-      return;
-    }
-    const searchArray = (recentAnalyses || []).filter((item) => {
-      const q = query.toLowerCase();
-      return (
-        item?.title?.toLowerCase().includes(q) ||
-        item?.snippet?.toLowerCase().includes(q) ||
-        item?.ticker?.toLowerCase().includes(q)
-      );
+  const updateNodeState = (nodeName: string, chunkContent: string) => {
+    const label = GRAPH_NODES[nodeName] || nodeName;
+
+    setNodes((prevNodes: NodeStatus[]) => {
+      const existingIndex = prevNodes.findIndex((n) => n.name === nodeName);
+
+      // 1. NODE DOES NOT EXIST YET -> Append as new running node & complete active prior nodes
+      if (existingIndex === -1) {
+        return [
+          ...prevNodes.map((n) =>
+            n.status === "running" ? { ...n, status: "completed" as const } : n,
+          ),
+          {
+            name: nodeName,
+            label: label,
+            status: "running",
+            nodeStreamText: chunkContent,
+          },
+        ];
+      }
+
+      // 2. NODE ALREADY EXISTS -> Append live text output to this specific node
+      return prevNodes.map((node, idx) => {
+        if (idx === existingIndex) {
+          return {
+            ...node,
+            status: "running",
+            nodeStreamText: (node.nodeStreamText || "") + chunkContent,
+          };
+        }
+        return node;
+      });
     });
-    setFilteredAnalyses(searchArray);
   };
 
-  const handleStartNewAnalysis = () => {
-    if (!prompt.trim()) return;
-    alert("Stock sent for analysis");
+  /**
+   * Helper to trigger complete state & collapse graph only when final completion yield arrives
+   */
+  const handleCompleteEvent = () => {
+    setIsGraphExpanded(false);
+    setIsReportExpanded(true);
+    setShowChatFloater(true);
+  };
+
+  /**
+   * Processes stream chunks line by line
+   */
+  const processStreamReader = async (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    isResumeFlow: boolean = false,
+  ) => {
+    const decoder = new TextDecoder("utf-8");
+    let accumulated = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      accumulated += chunk;
+      setStreamText((prev) => prev + chunk);
+
+      // --- 1. Parse Choice / Human-in-the-Loop Options ---
+      if (
+        chunk.includes("options") ||
+        chunk.includes("choices") ||
+        chunk.includes("lookback_days")
+      ) {
+        try {
+          const choicesMatch = chunk.match(
+            /"(?:options|choices)"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/,
+          );
+          if (choicesMatch && choicesMatch[1]) {
+            const parsedChoices: ChoiceOption[] = JSON.parse(choicesMatch[1]);
+            setHitlChoices(parsedChoices);
+          }
+        } catch (e) {
+          console.warn("Could not parse choices JSON chunk:", e);
+        }
+      }
+
+      // --- 2. Dynamic One-by-One Node Graph Execution ---
+      const lines = chunk.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        let detectedNode: string | null = null;
+        let eventPayload = line;
+
+        if (line.includes("event: complete")) {
+          handleCompleteEvent();
+        }
+
+        try {
+          const cleanLine = line.replace(/^data:\s*/, "").trim();
+
+          const parsed = JSON.parse(cleanLine);
+          if (parsed?.state?.final_action_payload) {
+            console.log("parsed for action", parsed);
+            // Extract the inner payload object (or fallback to parsed if it's top-level)
+            const reportPayload = parsed.state.final_action_payload;
+            setFinalReport(reportPayload);
+          }
+
+          // ONLY COLLAPSE GRAPH WHEN WE GET {"event": "complete", "data": ...}
+
+          if (parsed.node && GRAPH_NODES[parsed.node]) {
+            detectedNode = parsed.node;
+            eventPayload = parsed.content || parsed.data || line;
+          } else if (parsed.event && GRAPH_NODES[parsed.event]) {
+            detectedNode = parsed.event;
+            eventPayload =
+              typeof parsed.data === "string"
+                ? parsed.data
+                : JSON.stringify(parsed.data);
+          }
+        } catch {
+          // Fallback check for raw completion string in stream
+          if (line.includes("event: complete") && line.includes("finished")) {
+            handleCompleteEvent();
+          }
+
+          for (const nodeKey of Object.keys(GRAPH_NODES)) {
+            if (line.includes(nodeKey)) {
+              detectedNode = nodeKey;
+              break;
+            }
+          }
+        }
+
+        if (detectedNode) {
+          updateNodeState(detectedNode, eventPayload);
+        } else if (isResumeFlow) {
+          setNodes((prevNodes) =>
+            prevNodes.map((n) =>
+              n.status === "running"
+                ? { ...n, nodeStreamText: (n.nodeStreamText || "") + line }
+                : n,
+            ),
+          );
+        }
+      }
+    }
+
+    return accumulated;
+  };
+
+  /**
+   * Primary Submit Handler
+   */
+  const handleSubmit = async (userPrompt?: string) => {
+    const textToSend = userPrompt || prompt;
+    if (!textToSend.trim() || isAnalyzing) return;
+
+    setShowChatFloater(false);
+    setHasStarted(true);
+    setPrompt("");
+    setIsAnalyzing(true);
+
+    const endpoint =
+      activeEndpoint === "analyse"
+        ? "http://localhost:8000/demo/analyse"
+        : "http://localhost:8000/demo/chat";
+
+    if (activeEndpoint === "analyse") {
+      setStreamText("");
+      setNodes([]);
+      setFinalReport(null);
+      setIsGraphExpanded(true); // Keep expanded when starting analysis
+    }
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: textToSend.trim(),
+          user_id: "user_123",
+          ...(activeEndpoint === "chat" && { context: finalReport }),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const output = await processStreamReader(reader);
+    } catch (error) {
+      console.error("Request failed:", error);
+      if (activeEndpoint === "analyse") {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.status === "running" ? { ...n, status: "error" as const } : n,
+          ),
+        );
+      }
+      setActiveEndpoint("analyse");
+    } finally {
+      if (!hitlChoices) {
+        setIsAnalyzing(false);
+      }
+    }
+  };
+
+  /**
+   * HITL Choice Resume Handler
+   */
+  const handleResumeChoice = async (selectedChoice: ChoiceOption) => {
+    setHitlChoices(null);
+    setIsAnalyzing(true);
+
+    // Mark HITL node complete, graph STAYS EXPANDED until complete yield arrives
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.name === "ask_human_node"
+          ? { ...n, status: "completed" as const }
+          : n,
+      ),
+    );
+
+    try {
+      const response = await fetch("http://localhost:8000/demo/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_response: selectedChoice,
+          thread_id: "user_123",
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const output = await processStreamReader(reader, true);
+
+      setNodes((prev) =>
+        prev.map((n) => ({ ...n, status: "completed" as const })),
+      );
+
+      setActiveEndpoint("chat");
+    } catch (error) {
+      console.error("Resume execution failed:", error);
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.status === "running" ? { ...n, status: "error" as const } : n,
+        ),
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handlePromptClick = (text: string) => {
@@ -131,7 +373,7 @@ export default function AnalyseDashboard() {
     <div className="flex h-screen bg-slate-50 dark:bg-[#07090E] text-slate-800 dark:text-slate-100 font-sans antialiased overflow-hidden transition-colors duration-200">
       {/* LEFT SIDEBAR */}
       {showSideBar && (
-        <aside className="w-75 bg-white dark:bg-[#0A0E17] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between p-4 relative shrink-0 transition-colors duration-200">
+        <aside className="w-75 bg-white dark:bg-[#0A0E17] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between p-4 relative shrink-0 transition-colors duration-200 z-30">
           <div>
             {/* Logo Bar */}
             <div className="flex items-center justify-between mb-5">
@@ -152,63 +394,27 @@ export default function AnalyseDashboard() {
             </div>
 
             {/* New Analysis Button */}
-            <button className="w-full bg-emerald-50 dark:bg-[#102019] hover:bg-emerald-100 dark:hover:bg-[#142B21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 rounded-xl py-3 px-4 text-xs font-semibold flex items-center justify-center gap-2 transition mb-4 shadow-sm">
+            <button
+              onClick={() => {
+                setHasStarted(false);
+                setNodes([]);
+                setShowChatFloater(false);
+                setFinalReport(null);
+                setActiveEndpoint("analyse");
+                setIsGraphExpanded(true);
+              }}
+              className="w-full bg-emerald-50 dark:bg-[#102019] hover:bg-emerald-100 dark:hover:bg-[#142B21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 rounded-xl py-3 px-4 text-xs font-semibold flex items-center justify-center gap-2 transition mb-4 shadow-sm"
+            >
               <Plus className="w-4 h-4" />
               New Analysis
             </button>
 
-            {/* Search Box */}
-            <div className="relative mb-6">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400 dark:text-slate-500" />
-              <input
-                onChange={(e) => handleSearch(e.target.value)}
-                type="text"
-                placeholder="Search conversations..."
-                className="w-full bg-slate-100 dark:bg-[#111723] border border-slate-200 dark:border-slate-800/80 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 dark:text-slate-300 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
-              />
-            </div>
-
-            {/* Recent Conversations */}
-            <div className="space-y-1">
-              <div className="text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase px-1 mb-2">
-                Recent
-              </div>
-
-              {filteredAnalyses.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => setActiveThread(item.id)}
-                  className={`p-3 rounded-xl border cursor-pointer transition relative ${
-                    activeThread === item.id
-                      ? "bg-slate-200 dark:bg-[#121A29] border-slate-300 dark:border-slate-700"
-                      : "bg-slate-50 dark:bg-[#0E131F]/60 border-slate-200 dark:border-slate-800/40 hover:bg-slate-100 dark:hover:bg-[#121826]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                      {item.title}
-                    </h4>
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${item.color}`}
-                    >
-                      {item.ticker}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 mb-1">
-                    <Clock className="w-3 h-3" />
-                    <span>{item.time}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {item.snippet}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {/* User Threads */}
+            <UserThreads />
           </div>
 
-          {/* User Profile Area with Popup Menu */}
+          {/* User Profile Area */}
           <div className="relative border-t border-slate-200 dark:border-slate-800/60 pt-3">
-            {/* Profile Menu Overlay */}
             {showProfileMenu && (
               <div className="absolute bottom-16 left-0 right-0 bg-white dark:bg-[#0E131F] border border-slate-200 dark:border-slate-800 rounded-2xl p-2 shadow-2xl space-y-1 z-20 backdrop-blur-md">
                 <Link
@@ -258,7 +464,6 @@ export default function AnalyseDashboard() {
               </div>
             )}
 
-            {/* User Button */}
             <div
               onClick={() => setShowProfileMenu(!showProfileMenu)}
               className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/40 cursor-pointer transition"
@@ -291,8 +496,8 @@ export default function AnalyseDashboard() {
 
       {/* MAIN WORKSPACE AREA */}
       <main className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-[#07090E] relative overflow-hidden transition-colors duration-200">
-        {/* Top Header Bar */}
-        <header className="h-14 border-b border-slate-200 dark:border-slate-800/40 flex items-center justify-between px-6 bg-white dark:bg-[#07090E] transition-colors duration-200">
+        {/* Top Header */}
+        <header className="h-14 border-b border-slate-200 dark:border-slate-800/40 flex items-center justify-between px-6 bg-white dark:bg-[#07090E] transition-colors duration-200 shrink-0 z-10">
           <div className="flex items-center gap-3">
             <Menu
               className="w-5 h-5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 cursor-pointer"
@@ -320,79 +525,162 @@ export default function AnalyseDashboard() {
           </div>
         </header>
 
-        {/* Central Workspace Content */}
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-3xl mx-auto">
-          {/* Main Logo Card */}
-          <div className="p-4 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800/80 rounded-2xl text-emerald-600 dark:text-emerald-400 mb-6 shadow-xl dark:shadow-2xl">
-            <TrendingUp className="w-10 h-10" />
-          </div>
+        {/* Scrollable Main Content Area */}
+        <div className="flex-1 overflow-y-auto w-full p-6 pb-40">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {!hasStarted ? (
+              <div className="flex flex-col items-center text-center py-12">
+                <div className="p-4 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800/80 rounded-2xl text-emerald-600 dark:text-emerald-400 mb-6 shadow-xl dark:shadow-2xl">
+                  <TrendingUp className="w-10 h-10" />
+                </div>
 
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-3 tracking-tight">
-            Finance Agent
-          </h1>
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-3 tracking-tight">
+                  Finance Agent
+                </h1>
 
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 max-w-lg leading-relaxed">
-            Ask me to analyze any stock, build a portfolio thesis, assess risk,
-            or explain market dynamics — powered by 5 specialized AI agents
-            working in concert.
-          </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 max-w-lg leading-relaxed">
+                  Ask me to analyze any stock, build a portfolio thesis, assess
+                  risk, or explain market dynamics — powered by 5 specialized AI
+                  agents working in concert.
+                </p>
 
-          {/* Quick Prompt Pill Buttons */}
-          <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-xl">
-            {[
-              "Analyze NVDA earnings outlook",
-              "Compare AAPL vs MSFT risk",
-              "What's the macro outlook for SPY?",
-              "Build a thesis for TSLA",
-            ].map((text, idx) => (
-              <button
-                key={idx}
-                onClick={() => handlePromptClick(text)}
-                className="bg-white dark:bg-[#0E131F] hover:bg-slate-100 dark:hover:bg-[#131A2B] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-full px-4 py-2 text-xs transition duration-200 shadow-sm"
-              >
-                {text}
-              </button>
-            ))}
+                <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-xl">
+                  {[
+                    "Analyze NVDA earnings outlook",
+                    "Compare AAPL vs MSFT risk",
+                    "What's the macro outlook for SPY?",
+                    "Build a thesis for TSLA",
+                  ].map((text, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handlePromptClick(text)}
+                      className="bg-white dark:bg-[#0E131F] hover:bg-slate-100 dark:hover:bg-[#131A2B] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-full px-4 py-2 text-xs transition duration-200 shadow-sm"
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* 1. AGENT GRAPH */}
+                {nodes.length > 0 && (
+                  <div className="border border-slate-200 dark:border-slate-800/80 rounded-xl bg-white dark:bg-[#0E1523]/60 overflow-hidden transition-all duration-300 shadow-sm">
+                    <button
+                      onClick={() => setIsGraphExpanded(!isGraphExpanded)}
+                      className="w-full flex items-center justify-between p-3.5 bg-slate-100/80 dark:bg-slate-900/80 hover:bg-slate-200/80 dark:hover:bg-slate-800/80 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Agent Execution Workflow</span>
+                        {!isAnalyzing && (
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded font-mono">
+                            COMPLETE
+                          </span>
+                        )}
+                      </div>
+                      {isGraphExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-slate-400" />
+                      )}
+                    </button>
+
+                    {isGraphExpanded && (
+                      <div className="p-4">
+                        <AgentGraph
+                          nodes={nodes}
+                          streamText={streamText}
+                          isAnalyzing={isAnalyzing}
+                          choices={hitlChoices}
+                          onSelectChoice={handleResumeChoice}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. FINAL REPORT CARD */}
+                {finalReport && (
+                  <div className="border border-emerald-500/30 rounded-xl bg-white dark:bg-[#09111E] overflow-hidden shadow-lg shadow-emerald-500/5 transition-all duration-300">
+                    <button
+                      onClick={() => setIsReportExpanded(!isReportExpanded)}
+                      className="w-full flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-xs font-semibold text-emerald-800 dark:text-emerald-300 border-b border-emerald-500/20 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                        <span className="text-sm font-bold tracking-wide">
+                          Final Analysis Report
+                        </span>
+                      </div>
+                      {isReportExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                      )}
+                    </button>
+
+                    {isReportExpanded && (
+                      <div className="p-4">
+                        <FinalReportCard data={finalReport} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Bottom Input Area */}
-        <div className="p-6 bg-slate-50 dark:bg-[#07090E] relative transition-colors duration-200">
-          <div className="max-w-3xl mx-auto">
-            <div className="relative bg-white dark:bg-[#0E131F] border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 focus-within:border-emerald-500/60 transition shadow-xl dark:shadow-2xl">
-              <textarea
+        {/* 3. CENTERED FIXED BOTTOM INPUT BAR */}
+        <div className="fixed bottom-0 left-40 right-0 w-full bg-linear-to-t from-slate-50 via-slate-50/90 dark:from-[#07090E] dark:via-[#07090E]/90 to-transparent pt-4 pb-4 px-6 z-20 pointer-events-none flex flex-col items-center justify-center">
+          <div className="w-full max-w-3xl relative pointer-events-auto">
+            {/* Animated Chat Prompt Popup */}
+            {showChatFloater && (
+              <div
+                onClick={() => setShowChatFloater(false)}
+                className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-emerald-500 text-slate-950 px-3.5 py-1.5 rounded-full text-xs font-bold shadow-lg shadow-emerald-500/20 animate-bounce cursor-pointer z-30 whitespace-nowrap"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Have questions about this report? Chat below!</span>
+                <ArrowDown className="w-3.5 h-3.5" />
+              </div>
+            )}
+
+            <div className="relative flex items-center bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800/80 rounded-xl p-1 shadow-xl w-full">
+              <input
+                type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleStartNewAnalysis();
-                  }
-                }}
-                placeholder="Build a thesis for TSLA"
-                rows={1}
-                className="w-full bg-transparent px-3 py-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none overflow-y-auto"
+                onFocus={() => setShowChatFloater(false)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && !e.shiftKey && handleSubmit()
+                }
+                placeholder={
+                  isAnalyzing
+                    ? "Agents are analyzing stock data..."
+                    : activeEndpoint === "chat"
+                      ? "Ask follow-up questions about this analysis..."
+                      : "Build a thesis for TSLA..."
+                }
+                disabled={isAnalyzing}
+                className="flex-1 bg-transparent px-3 py-2 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none disabled:opacity-50"
               />
+
               <button
-                onClick={handleStartNewAnalysis}
-                className={`absolute right-2.5 top-2.5 p-2 rounded-xl transition ${
-                  prompt.trim()
-                    ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400"
-                    : "bg-emerald-500/20 text-emerald-400/50"
-                }`}
+                onClick={() => handleSubmit()}
+                disabled={isAnalyzing || !prompt.trim()}
+                className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 shrink-0"
               >
                 <Send className="w-4 h-4" />
+                <span className="text-xs font-semibold px-1">
+                  {activeEndpoint === "chat" ? "Chat" : "Send"}
+                </span>
               </button>
             </div>
 
-            <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 mt-2 px-1 font-mono">
-              <span>
-                Press Enter to send · Shift+Enter for new line · Not financial
-                advice
-              </span>
-              <button className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
-                <HelpCircle className="w-4 h-4" />
-              </button>
+            <div className="flex justify-between items-center px-2 mt-1 text-[10px] text-slate-500 w-full">
+              <span>Press Enter to send · Shift+Enter for new line</span>
             </div>
           </div>
         </div>

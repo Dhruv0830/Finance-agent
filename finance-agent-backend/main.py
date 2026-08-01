@@ -3,16 +3,16 @@ from fastapi import FastAPI, HTTPException, APIRouter, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
-from analyse_agent.generators import generate_thread_id, analyse_stream_generator, resume_stream_generator, chat_stream_generator
 from dotenv import load_dotenv
-from analyse_agent.db import create_thread_and_initial_message, update_thread_and_log_resume_input
-from auth import get_current_user_id
-from analyse_agent.config import get_graph_config 
-from .analyse_agent.db import lifespan 
-# Load variables from backend/.env
 load_dotenv()
+from analyse_agent.generators import analyse_stream_generator, resume_stream_generator, chat_stream_generator
+from analyse_agent.db import create_thread_and_initial_message, update_thread_and_log_resume_input, get_user_threads
+from auth import get_current_user_id 
+from analyse_agent.db import lifespan 
+from demo import router as demo_router
+# Load variables from backend/.env
 
-app = FastAPI(title="FinAgent SSE Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="FinAgent SSE Backend", version="1.0.0",) #lifespan=lifespan)
 
 # Enable CORS for Next.js frontend communication
 app.add_middleware(
@@ -23,7 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+#Demo routes
+app.include_router(demo_router)
 # --- Request Schemas ---
 
 class ChatRequest(BaseModel):
@@ -118,6 +119,21 @@ async def resume_finance_endpoint(request: ResumeRequest, user_id: str = Depends
         resume_stream_generator(user_response=user_response, thread_id=thread_id),
         media_type="text/event-stream"
     )
+    
+#All of the user's conversation threads 
+@app.get("/threads")
+async def get_threads_endpoint(user_id: str = Depends(get_current_user_id)):
+    """
+    Fetches all historical conversation threads for the authenticated user.
+    """
+    try:
+        threads = await get_user_threads(user_id=user_id)
+        return {"threads": threads}
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve conversation history: {str(err)}"
+        )
     
 # if __name__ == "__main__":
 #     import uvicorn

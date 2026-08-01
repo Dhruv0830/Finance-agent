@@ -36,3 +36,8 @@ chat_model = init_chat_model(
     "google_genai:gemini-2.5-flash",
     temperature=0,
 )
+
+# analysis_model = init_chat_model(
+#     "google_genai:gemini-2.5-flash",
+#     temperature=0,
+# )

@@ -1,12 +1,10 @@
 import json
-import uuid
 from .config import get_graph_config
-from analyse_agent import run_finance_analysis, resume_finance_analysis
+from .agent import run_finance_analysis, resume_finance_analysis
 from typing import AsyncGenerator
-from db import (
-    create_thread_and_initial_message,
-    update_thread_and_log_resume_input,
-    record_thread_message
+from .db import (
+    record_thread_message,
+    complete_thread_analysis
 )
 
 # --- SSE Event Generators ---
@@ -109,15 +107,25 @@ async def resume_stream_generator(user_response: dict, thread_id: str) -> AsyncG
 
             # 3. Log intermediate node updates into thread_messages
             if event_type == "node_update":
+                node_name = data_payload.get("node")
+                state = data_payload.get("state", {})
                 await record_thread_message(
                     thread_id=thread_id,
                     role="assistant",
-                    node_name=data_payload.get("node"),
+                    node_name=node_name,
                     content={
                         "type": "node_update",
-                        "state": data_payload.get("state")
+                        "state": state
                     }
                 )
+                
+                # 2. When the graph hits the final node, just flip the thread mode to 'CHAT'
+                if node_name == "send_action_json":
+                    payload = state.get("final_action_payload") or {}
+                    
+                    await complete_thread_analysis(
+                        thread_id=thread_id,
+                    )
 
             # 4. Stream event out over SSE
             yield {

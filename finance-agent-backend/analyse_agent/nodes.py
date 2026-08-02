@@ -43,13 +43,15 @@ def stock_search_node(state: AgentState) -> dict:
       return {
           "search_options": [],
           "company_name": "NOT_FOUND",
-          "messages": [HumanMessage("Search Stock: ", query)]
+          "messages": [AIMessage(content=f"Unable to find search options for query: '{query}'.").model_dump()]
       }
+      
+    agent_message = structured_response.model_dump_json(indent=2)
 
     return {
-        "search_options": structured_response.listings,
+        "search_options": [item.model_dump() for item in structured_response.listings],
         "company_name": structured_response.company_name,
-        "messages": [AIMessage(structured_response.model_dump_json(indent=2))]
+        "messages": [AIMessage(content = agent_message ).model_dump()]
 
     }
 
@@ -58,7 +60,7 @@ def stock_search_node(state: AgentState) -> dict:
 def ask_human_node(state: AgentState) -> dict:
     print("Ask Human Node: Entering the Human Node")
 
-    options = state.search_options or []
+    options = [item.model_dump_json() for item in state.search_options] or []
 
     if not options:
         print("Ask Human Node: No search options found to present. Automatically terminating.")
@@ -73,7 +75,7 @@ def ask_human_node(state: AgentState) -> dict:
     print("Ask Human Node: Choices: ", interrupt_payload)
 
     #Generate an interrupt and wait for the human's response
-    human_response = interrupt(interrupt_payload)
+    human_response : AgentInput | dict = interrupt(interrupt_payload)
 
     print("Ask Human Node: Selection received: ",human_response)
 
@@ -85,8 +87,8 @@ def ask_human_node(state: AgentState) -> dict:
 
     # 4. Save the chosen asset back to the state so intent_parser can route it
     return {
-        "user_choice": validated_choice,
-        "messages": [HumanMessage("Search Stock: ", json.dumps(human_response, indent=2) )]
+        "user_choice": validated_choice.model_dump_json(),
+        "messages": [HumanMessage(content = f"Search Stock: {human_response}" ).model_dump()]
     }
     
 
@@ -422,7 +424,7 @@ def social_momentum_analyst(state: AgentState) -> dict:
   if not state.standardized_social_dump:
     return {
         "messages" : [
-            AIMessage(content= "Insufficient social data for this stock ticker")
+            AIMessage(content= "Insufficient social data for this stock ticker").model_dump()
         ],
         "social_momentum_analysis": {
             "momentum_score": 0.0,
@@ -435,7 +437,7 @@ def social_momentum_analyst(state: AgentState) -> dict:
 
   # 2. Attach .with_retry() to the structured runnable second
   social_llm = structured_llm.with_retry(
-      stop_after_attempt=5,
+      stop_after_attempt=2,
       wait_exponential_jitter=True
   )
 
@@ -454,15 +456,15 @@ def social_momentum_analyst(state: AgentState) -> dict:
     if analysis_result:
       analysis_result = analysis_result.model_dump_json(indent=2)
     else:
-        analysis_result = json.dumps({
+        analysis_result = {
             "status": "ERROR",
             "summary": "Analysis unavailable due to upstream API error.",
             "sentiment_score": 0.0
-        }, indent=2)
+        }
 
   return {
       "messages": [
-          AIMessage(content="Analysis data ready to be displayed.")
+          AIMessage(content="Analysis data ready to be displayed.").model_dump()
       ],
       "social_momentum_analysis": analysis_result
   }
@@ -474,7 +476,7 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
   if not state.standardized_fundamentals:
     return {
         "messages" : [
-            AIMessage(content= "Insufficient fundamental data for this stock ticker")
+            AIMessage(content= "Insufficient fundamental data for this stock ticker").model_dump()
         ],
         "quantitative_valuation_analysis": {
             "momentum_score": 0.0,
@@ -489,7 +491,7 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
 
   # 2. Attach .with_retry() to the structured runnable second
   quant_llm = structured_llm.with_retry(
-      stop_after_attempt=5,
+      stop_after_attempt=2,
       wait_exponential_jitter=True
   )
 
@@ -507,15 +509,15 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
     if analysis_result:
       analysis_result = analysis_result.model_dump_json(indent=2)
     else:
-        analysis_result = json.dumps({
+        analysis_result = {
             "status": "ERROR",
             "summary": "Analysis unavailable due to upstream API error.",
             "sentiment_score": 0.0
-        }, indent=2)
+        }
 
   return {
       "messages": [
-          AIMessage(content="Quantitative analysis data ready to be displayed.")
+          AIMessage(content="Quantitative analysis data ready to be displayed.").model_dump()
       ],
       "quantitative_valuation_analysis": analysis_result
   }
@@ -526,7 +528,7 @@ def orchestrator(state: AgentState) -> dict:
   print("Orchestrator/Risk Critic Agent Node: State: ", state)
   if not state.quantitative_valuation_analysis or not state.social_momentum_analysis:
     return {
-        "messages": [AIMessage(content="Insufficient data for analysis.")],
+        "messages": [AIMessage(content="Insufficient data for analysis.").model_dump()],
         "dissonance_score": 0,
         "executive_summary": "Insufficient data for analysis."
     }
@@ -663,7 +665,7 @@ def action_payload(state: AgentState) -> dict:
   }
   
 #Node 11:
-def send_action_json(state: AgentState) -> dict:
+# def send_action_json(state: AgentState) -> dict:
   print("Send Action Node: ")
 
   payload = state.final_action_payload or {}

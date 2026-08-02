@@ -1,40 +1,51 @@
 import os
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-
-# Get SUPABASE_JWT_SECRET from your Supabase Dashboard -> Project Settings -> API
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-ALGORITHM = "HS256"
 
 security = HTTPBearer()
 
-async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """
-    Extracts and verifies the Supabase JWT token from the Authorization header,
-    returning the authenticated user's UUID (sub claim).
-    """
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+
+# Initialize PyJWKClient (it fetches & caches public keys from Supabase)
+jwks_client = jwt.PyJWKClient(JWKS_URL)
+
+def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     token = credentials.credentials
+
     try:
-        # Decode and verify token signature using your Supabase JWT secret
+        # 1. Dynamically retrieve the signing public key for this specific token
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+        # 2. Verify and decode using ES256 and the public key
         payload = jwt.decode(
-            token, 
-            SUPABASE_JWT_SECRET, 
-            algorithms=[ALGORITHM], 
-            audience="authenticated"
+            token,
+            signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated"  # Default Supabase audience for authenticated users
         )
-        
-        # 'sub' contains the user_id from auth.users.id
-        user_id: str = payload.get("sub") 
-        if user_id is None:
+
+        # 3. Extract the user's UUID
+        user_id: str = payload.get("sub")
+        if not user_id:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Invalid token: user ID missing."
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token payload is missing user ID (sub)."
             )
+
         return user_id
 
-    except JWTError:
+    except jwt.PyJWTError as e:
+        # Catch signature mismatches, expired tokens, or invalid claims
+        print(f"JWT Verification Failed: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Could not validate credentials / Invalid JWT token."
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Could not validate credentials: {str(e)}"
+        )
+    except Exception as e:
+        print(f"Unexpected Auth Error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal authentication error."
         )

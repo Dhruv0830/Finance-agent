@@ -32,12 +32,17 @@ import {
   MessageSquare,
   ArrowDown,
 } from "lucide-react";
-import { UserThreads, ThreadWithColor, Thread } from "../profile/page";
+import {
+  UserThreads,
+  getCookie,
+  ThreadWithColor,
+  Thread,
+} from "../profile/page";
 import { convertSegmentPathToStaticExportFilename } from "next/dist/shared/lib/segment-cache/segment-value-encoding";
 
 const GRAPH_NODES: Record<string, string> = {
-  stock_search_node: "1. Extract Ticker",
-  ask_human_node: "2. Human Validation",
+  stock_search: "1. Extract Ticker",
+  ask_human: "2. Human Validation",
 
   india_fundamental: "3. Market Analysis",
   india_X_reddit: "4. Social Buzz",
@@ -271,8 +276,8 @@ export default function AnalyseDashboard() {
 
     const endpoint =
       activeEndpoint === "analyse"
-        ? "http://localhost:8000/demo/analyse"
-        : "http://localhost:8000/demo/chat";
+        ? `${process.env.NEXT_PUBLIC_API_URL}/api/finance/analyse`
+        : `${process.env.NEXT_PUBLIC_API_URL}/api/finance/chat`;
 
     if (activeEndpoint === "analyse") {
       setStreamText("");
@@ -282,9 +287,13 @@ export default function AnalyseDashboard() {
     }
 
     try {
+      const token = await getCookie(supabase);
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           prompt: textToSend.trim(),
           user_id: "user_123",
@@ -293,13 +302,14 @@ export default function AnalyseDashboard() {
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+        console.log(`HTTP error! Status: ${response.status}`);
+        return;
       }
 
       const reader = response.body.getReader();
       const output = await processStreamReader(reader);
     } catch (error) {
-      console.error("Request failed:", error);
+      console.log("Request failed:", error);
       if (activeEndpoint === "analyse") {
         setNodes((prev) =>
           prev.map((n) =>
@@ -332,17 +342,25 @@ export default function AnalyseDashboard() {
     );
 
     try {
-      const response = await fetch("http://localhost:8000/demo/resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_response: selectedChoice,
-          thread_id: "user_123",
-        }),
-      });
+      const token = await getCookie(supabase);
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/finance/resume`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            user_response: selectedChoice,
+            thread_id: "user_123",
+          }),
+        },
+      );
 
       if (!response.ok || !response.body) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+        console.log(`HTTP error! Status: ${response.status}`);
+        return;
       }
 
       const reader = response.body.getReader();
@@ -354,7 +372,7 @@ export default function AnalyseDashboard() {
 
       setActiveEndpoint("chat");
     } catch (error) {
-      console.error("Resume execution failed:", error);
+      console.log("Resume execution failed:", error);
       setNodes((prev) =>
         prev.map((n) =>
           n.status === "running" ? { ...n, status: "error" as const } : n,

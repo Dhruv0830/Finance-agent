@@ -14,7 +14,6 @@ checkpointer: Optional[AsyncPostgresSaver] = None
 
 def get_db_uri() -> str:
     uri = os.getenv("DATABASE_URL")
-    print("THis is DB URL", uri)
     if not uri:
         raise RuntimeError("DATABASE_URL environment variable is not set.")
     return uri
@@ -32,18 +31,25 @@ async def lifespan(app: FastAPI):
     # 1. Initialize shared connection pool
     pool = AsyncConnectionPool(
         conninfo=get_db_uri(),
+        min_size=1,
         max_size=8,
-        kwargs={"autocommit": True},
+        max_idle=300,        # Close idle connections after 5 mins
+        max_lifetime=1800,   # Refresh connections every 30 mins
+        kwargs={
+            "autocommit": True,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
         open=False
     )
     
-    print("Setup done now opening the pool", pool)
     await pool.open()
 
     # 2. Initialize LangGraph checkpointer using the same pool
     checkpointer = AsyncPostgresSaver(pool)
     await checkpointer.setup()
-    print("checkpointer added", checkpointer)
     yield  # Application running
 
     # 3. Cleanup connection pool on application shutdown
@@ -84,7 +90,7 @@ async def create_thread_and_initial_message(
             )
             
             row = await result.fetchone()
-            thread_id = str(row["id"] if isinstance(row, dict) else row[0])
+            thread_id = str(row[0])
 
             # 2. Insert First User Message
             user_msg_content = {"type": "human", "text": prompt}
@@ -93,7 +99,7 @@ async def create_thread_and_initial_message(
                 INSERT INTO public.thread_messages (thread_id, role, node_name, content, created_at)
                 VALUES (%s, 'user', 'user_input', %s::jsonb, NOW());
                 """,
-                (thread_id, json.dumps(user_msg_content))
+                (thread_id, json.dumps(user_msg_content,default=str))
             )
             
             return thread_id
@@ -111,10 +117,10 @@ async def update_thread_and_log_resume_input(
     # Safely extract ticker and serialize content regardless of dict or Pydantic model
     if isinstance(resume_payload, dict):
         ticker = resume_payload.get("ticker", "PENDING")
-        payload_json = json.dumps(resume_payload)
+        payload_json = json.dumps(resume_payload,default=str)
     else:
         ticker = getattr(resume_payload, "ticker", "PENDING")
-        payload_json = resume_payload.model_dump_json() if hasattr(resume_payload, "model_dump_json") else json.dumps(resume_payload.__dict__)
+        payload_json = resume_payload.model_dump_json() if hasattr(resume_payload, "model_dump_json") else json.dumps(resume_payload.__dict__,default=str)
 
     title = f"Analyse {ticker} stock" 
     
@@ -163,7 +169,7 @@ async def record_thread_message(
                 INSERT INTO public.thread_messages (thread_id, role, node_name, content, created_at)
                 VALUES (%s, %s, %s, %s::jsonb, NOW());
                 """,
-                (thread_id, role, node_name, json.dumps(content))
+                (thread_id, role, node_name, json.dumps(content, default=str))
             )
             await conn.execute(
                 """

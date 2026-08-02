@@ -35,7 +35,7 @@ builder.add_node("adjust_confidence_weights", adjust_confidence_weights)
 
 #Layer 8:
 builder.add_node("action_payload", action_payload)
-builder.add_node("send_action_json", send_action_json)
+# builder.add_node("send_action_json", send_action_json)
 
 builder.add_edge(START, 'stock_search')
 builder.add_edge("stock_search", "ask_human")
@@ -78,8 +78,8 @@ builder.add_conditional_edges(
     )
 
 builder.add_edge("adjust_confidence_weights","orchestrator")
-builder.add_edge("action_payload","send_action_json")
+builder.add_edge("action_payload",END)
     
 async def get_finance_graph():
-    checkpointer = await get_checkpointer()
+    checkpointer = get_checkpointer()
     return builder.compile(checkpointer=checkpointer)

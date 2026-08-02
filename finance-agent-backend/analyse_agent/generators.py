@@ -120,7 +120,7 @@ async def resume_stream_generator(user_response: dict, thread_id: str) -> AsyncG
                 )
                 
                 # 2. When the graph hits the final node, just flip the thread mode to 'CHAT'
-                if node_name == "send_action_json":
+                if node_name == "action_payload":
                     payload = state.get("final_action_payload") or {}
                     
                     await complete_thread_analysis(

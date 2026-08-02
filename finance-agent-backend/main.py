@@ -12,7 +12,7 @@ from analyse_agent.db import lifespan
 from demo import router as demo_router
 # Load variables from backend/.env
 
-app = FastAPI(title="FinAgent SSE Backend", version="1.0.0",) #lifespan=lifespan)
+app = FastAPI(title="FinAgent SSE Backend", version="1.0.0", lifespan=lifespan)
 
 # Enable CORS for Next.js frontend communication
 app.add_middleware(
@@ -121,11 +121,12 @@ async def resume_finance_endpoint(request: ResumeRequest, user_id: str = Depends
     )
     
 #All of the user's conversation threads 
-@app.get("/threads")
+@app.get("/api/finance/threads")
 async def get_threads_endpoint(user_id: str = Depends(get_current_user_id)):
     """
     Fetches all historical conversation threads for the authenticated user.
     """
+    
     try:
         threads = await get_user_threads(user_id=user_id)
         return {"threads": threads}

@@ -2,7 +2,7 @@
 import { Search, Clock } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { createClient } from "@/src/lib/supabase"; // Adjust path to your client
-import { User } from "@supabase/supabase-js";
+import { SupabaseClient, User } from "@supabase/supabase-js";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -128,12 +128,21 @@ export interface ThreadWithColor extends Thread {
   color: string;
 }
 
+export const getCookie = async (supabase: SupabaseClient): Promise<string> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token || "";
+  return token;
+};
+
 export function UserThreads() {
   const [threads, setThreads] = useState<[]>([]);
   const [activeThread, setActiveThread] = useState<string | null>(null);
   const [filteredAnalyses, setFilteredAnalyses] = useState<ThreadWithColor[]>(
     [],
   );
+  const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const TAILWIND_COLOR_PALETTE = [
@@ -148,32 +157,35 @@ export function UserThreads() {
     async function getThreads() {
       try {
         setLoading(true);
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/demo/threads`,
-          {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        );
+        // const response = await fetch(
+        //   `${process.env.NEXT_PUBLIC_API_URL}/threads`,
+        //   {
+        //     method: "GET",
+        //     headers: {
+        //       "Content-Type": "application/json",
+        //     },
+        //   },
+        // );
 
         // =========================================================
         // PRODUCTION ROUTE (COMMENTED OUT)
         // =========================================================
-        /*
-        const token = localStorage.getItem("access_token"); // Or retrieve from your Auth Context / Cookie
-        const response = await fetch("http://localhost:8000/api/v1/threads", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
+
+        const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
           },
-        });
-        */
+        );
 
         if (!response.ok) {
-          throw new Error(`Failed to fetch threads: ${response.statusText}`);
+          console.log(`Failed to fetch threads: ${response.statusText}`);
+          return;
         }
 
         const data = await response.json();

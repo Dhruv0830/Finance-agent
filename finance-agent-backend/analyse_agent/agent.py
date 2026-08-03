@@ -4,6 +4,25 @@ from typing import AsyncGenerator
 from langgraph.types import Command
 from .builder import get_finance_graph  # Function that returns uncompiled StateGraph
 
+NODE_NAMES = {
+  "stock_search",
+  "ask_human", 
+
+  "india_fundamental",
+  "india_X_reddit",
+  "us_fundamental",
+  "us_X_reddit",
+
+  "state_consolidation",
+  "social_momentum_analyst",
+
+  "quantitative_valuation_analyst",
+
+  "orchestrator",
+
+  "action_payload"
+}
+
 async def run_finance_analysis(input_data: dict, config: dict) -> AsyncGenerator[dict, None]:
     """
     Executes an initial analysis run for a specific user thread.
@@ -15,11 +34,25 @@ async def run_finance_analysis(input_data: dict, config: dict) -> AsyncGenerator
     finance_graph = await get_finance_graph()
     
     # 1. Stream normal execution
-    async for event in finance_graph.astream(input_data, config=config, stream_mode="updates"):
-        for node_name, updated_state in event.items():
+    async for event in finance_graph.astream_events(input_data, config=config, stream_mode="updates", version="v2"):
+        kind = event["event"]
+        node_name = event["name"]
+        
+        if kind == "on_chain_start" and node_name in NODE_NAMES:
             yield {
                 "event": "node_update",
-                "data": json.dumps({"node": node_name, "state": updated_state})
+                "data": json.dumps({"node": node_name, "status": "running"})
+            }
+        elif kind == "on_chain_end" and node_name in NODE_NAMES:
+            output_data = event["data"].get("output", {})
+            
+            yield {
+                "event": "node_update",
+                "data": json.dumps({
+                    "node": node_name, 
+                    "status": "completed",
+                    "state": output_data
+                }, default=str) # default=str prevents serialization crashes
             }
 
     # 2. Check if execution paused on an active Human-in-the-Loop interrupt
@@ -29,8 +62,9 @@ async def run_finance_analysis(input_data: dict, config: dict) -> AsyncGenerator
         yield {
             "event": "interrupt",
             "data": json.dumps({
+                "node": current_state.tasks[0].name,
                 "message": interrupt_info.get("message", "Human input required"),
-                "choices": interrupt_info.get("choices", [])
+                "options": interrupt_info.get("options", [])
             })
         }
     else:
@@ -50,11 +84,26 @@ async def resume_finance_analysis(user_response: dict, config: dict) -> AsyncGen
     
     finance_graph = await get_finance_graph()
     
-    async for event in finance_graph.astream(Command(resume=user_response), config=config, stream_mode="updates"):
-        for node_name, updated_state in event.items():
+    async for event in finance_graph.astream_events(Command(resume=user_response), config=config, stream_mode="updates", version="v2"):
+        kind = event["event"]
+        node_name = event["name"]
+        
+        if kind == "on_chain_start" and node_name in NODE_NAMES:
             yield {
                 "event": "node_update",
-                "data": json.dumps({"node": node_name, "state": updated_state})
+                "data": json.dumps({"node": node_name, "status": "running"})
+            }
+            
+        elif kind == "on_chain_end" and node_name in NODE_NAMES:
+            output_data = event["data"].get("output", {})
+            
+            yield {
+                "event": "node_update",
+                "data": json.dumps({
+                    "node": node_name, 
+                    "status": "completed",
+                    "state": output_data
+                }, default=str) # default=str prevents serialization crashes
             }
             
     yield {

@@ -89,7 +89,6 @@ async def analyse_finance_endpoint(request: AnalyseRequest, user_id: str = Depen
 @app.post("/api/finance/resume")
 async def resume_finance_endpoint(request: ResumeRequest, user_id: str = Depends(get_current_user_id)):
     # Match the EXACT same thread_id used when the interrupt occurred
-    
     thread_id = request.thread_id
     user_response = request.user_response
     

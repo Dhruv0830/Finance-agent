@@ -1,699 +1,569 @@
+import json
 import pandas as pd
 import yfinance as yf
-from langchain.agents.middleware import HumanInTheLoopMiddleware
-from langgraph.types import interrupt
-from langgraph.types import Command
 from langchain_core.messages import HumanMessage, AIMessage
-import json
+from langgraph.types import interrupt, Command
 from langchain_tavily import TavilySearch
+
 from .tools import tool_array
 from .prompts import *
 from .config import analysis_model, chat_model
 from .schemas import *
 
-#Bind Tools
-
+# Bind Tools
 model_with_tools = analysis_model.bind_tools(tool_array)
-
-#Add structured output
-
 structuring_chain = model_with_tools.with_structured_output(StructuredCompanyListings)
-
 prompt = PROMPT
 search_chain = prompt | structuring_chain
 
-# Node 1:
+
+# Node 1: Stock Search
 def stock_search_node(state: AgentState) -> dict:
     print("Search Node: Executing Web Search Node")
 
     query = state.messages[-1].content
-
     print("Search Node: User Query: ", query)
 
     structured_response = None
-
     try:
-      structured_response = search_chain.invoke({"query": query})
-      print("Search Node: Search Results: ", structured_response)
-
+        structured_response = search_chain.invoke({"query": query})
+        print("Search Node: Search Results: ", structured_response)
     except Exception as e:
-      print(f"Search Node: Error in Search Chain: {e}")
+        print(f"Search Node: Error in Search Chain: {e}")
 
     if structured_response is None:
-      return {
-          "search_options": [],
-          "company_name": "NOT_FOUND",
-          "messages": [AIMessage(content=f"Unable to find search options for query: '{query}'.").model_dump()]
-      }
-      
-    agent_message = structured_response.model_dump_json(indent=2)
+        return {
+            "search_options": [],
+            "company_name": "NOT_FOUND",
+            "messages": [AIMessage(content=f"Unable to find search options for query: '{query}'.")]
+        }
 
+    # Pass AIMessage directly to messages, and Pydantic items directly to search_options
     return {
-        "search_options": [item.model_dump() for item in structured_response.listings],
+        "search_options": structured_response.listings,
         "company_name": structured_response.company_name,
-        "messages": [AIMessage(content = agent_message ).model_dump()]
-
+        "messages": [AIMessage(content=structured_response.model_dump_json(indent=2))]
     }
 
 
-#Node 2:
+# Node 2: Human-in-the-Loop Interruption
 def ask_human_node(state: AgentState) -> dict:
     print("Ask Human Node: Entering the Human Node")
 
-    options = [item.model_dump_json() for item in state.search_options] or []
-
+    # Options are Pydantic objects, convert to json strings for human display
+    options = [item.model_dump() for item in state.search_options or [] ] 
     if not options:
         print("Ask Human Node: No search options found to present. Automatically terminating.")
         return {"user_choice": None}
 
-    #Package the options into a payload to pass to the user interface
     interrupt_payload = {
         "message": f"Multiple listings found for {state.company_name}. Please choose a market asset:",
-        "choices": options
+        "company_name":{state.company_name},
+        "options": options
     }
 
     print("Ask Human Node: Choices: ", interrupt_payload)
-
-    #Generate an interrupt and wait for the human's response
-    human_response : AgentInput | dict = interrupt(interrupt_payload)
-
-    print("Ask Human Node: Selection received: ",human_response)
+    human_response: AgentInput | dict = interrupt(interrupt_payload)
+    print("Ask Human Node: Selection received: ", human_response)
 
     if isinstance(human_response, dict):
         validated_choice = AgentInput(**human_response)
     else:
-        # Fallback if it's somehow already an AgentInput object
         validated_choice = human_response
 
-    # 4. Save the chosen asset back to the state so intent_parser can route it
+    # Save Pydantic object directly back to state!
     return {
-        "user_choice": validated_choice.model_dump_json(),
-        "messages": [HumanMessage(content = f"Search Stock: {human_response}" ).model_dump()]
+        "user_choice": validated_choice,
+        "messages": [HumanMessage(content=f"Search Stock: {human_response}")]
     }
-    
 
-#Router function to route the agent to correct market
-#Node 3:
+
+# Node 3: Router
 def market_router(state: AgentState) -> str:
-  market_name = state.user_choice.market if state.user_choice else "NOT_FOUND"
-  print(f"Market Router: Market : {market_name}")
+    # Full dot notation access!
+    market_name = state.user_choice.market if state.user_choice else "NOT_FOUND"
+    print(f"Market Router: Market : {market_name}")
 
-  if market_name == "NOT_FOUND":
-    return "terminate"
-  elif state.user_choice.ticker == "NOT_FOUND":
-    return "terminate"
-  elif market_name == "INDIA":
-    return "india_tools"
-  else:
-    return "us_tools"
-
-
-def india_tools(state: AgentState) -> str:
-  print("India Tools: State: ", state)
-  return {}
+    if market_name == "NOT_FOUND" or (state.user_choice and state.user_choice.ticker == "NOT_FOUND"):
+        return "terminate"
+    elif market_name == "INDIA":
+        return "india_tools"
+    else:
+        return "us_tools"
 
 
-def us_tools(state: AgentState) -> str:
-  print("US Tools: State: ", state)
-  return {}
+def india_tools(state: AgentState) -> dict:
+    print("India Tools: ")
+    return {}
 
 
-#Termination node if stock not found
-#Node 4a:
-def termination_node(state: AgentState):
-  print("Termination Node: Stock verification failed after maximum attempts. Routing error message.", state)
-  return {
-      "messages": [
-          "System Notice: We were unable to verify this stock ticker on US or Indian markets after searching. Please check your spelling and try again."
-      ]
-  }
-  
-  
-#Node 4b:
+def us_tools(state: AgentState) -> dict:
+    print("US Tools: ")
+    return {}
+
+
+def termination_node(state: AgentState) -> dict:
+    print("Termination Node: Stock verification failed after maximum attempts.")
+    return {
+        "messages": [
+            AIMessage(content="System Notice: We were unable to verify this stock ticker on US or Indian markets after searching. Please check your spelling and try again.")
+        ]
+    }
+
+
+# Node 4b: Fundamental India Data
 def india_fundamental(state: AgentState) -> dict:
-  print("India Fundamental Node: State: ", state)
-  choice = state.user_choice
-  stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
-  lookback_days = choice.lookback_days
+    print("India Fundamental Node: ")
+    choice = state.user_choice
+    stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
+    lookback_days = choice.lookback_days
 
-  ticker_obj = yf.Ticker(stock_name)
-  history_df = ticker_obj.history(period=f"{lookback_days}d")
+    ticker_obj = yf.Ticker(stock_name)
+    history_df = ticker_obj.history(period=f"{lookback_days}d")
+    # 1. Reset index to turn Date/Datetime into an explicit column
+    history_df = history_df.reset_index()
 
-  price_history = history_df.to_dict(orient="records")
+    # 2. Convert all datetime/timestamp columns to ISO string format
+    for col in history_df.select_dtypes(include=["datetime64", "datetimetz"]).columns:
+        history_df[col] = history_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-  info = ticker_obj.info or {}
-  key_ratios = {
-      "current_price": info.get("currentPrice") or info.get("previousClose"),
-      "market_cap": info.get("marketCap"),
-      "pe_ratio": info.get("trailingPE"),
-      "forward_pe": info.get("forwardPE"),
-      "peg_ratio": info.get("pegRatio"),
-      "price_to_book": info.get("priceToBook"),
-      "debt_to_equity": info.get("debtToEquity"),
-      "return_on_equity": info.get("returnOnEquity"),
-      "free_cash_flow": info.get("freeCashflow"),
-      "ebitda": info.get("ebitda"),
-      "total_revenue": info.get("totalRevenue"),
-      "revenue_growth": info.get("revenueGrowth"),
-      "profit_margins": info.get("profitMargins"),
-  }
+    # 3. Clean native Python dict records (safe for state & JSON serialization)
+    price_history = history_df.to_dict(orient="records")
 
-  # 3. Extract Recent Financial Statements (Quarterly)
-  # Convert DataFrames to string/dict representations safely
-  financials = {}
-  try:
-      q_financials = ticker_obj.quarterly_financials
-      if not q_financials.empty:
-          # Take top key lines (e.g., Total Revenue, Net Income)
-          financials["income_statement"] = q_financials.fillna(0).to_dict()
+    info = ticker_obj.info or {}
+    key_ratios = {
+        "current_price": info.get("currentPrice") or info.get("previousClose"),
+        "market_cap": info.get("marketCap"),
+        "pe_ratio": info.get("trailingPE"),
+        "forward_pe": info.get("forwardPE"),
+        "peg_ratio": info.get("pegRatio"),
+        "price_to_book": info.get("priceToBook"),
+        "debt_to_equity": info.get("debtToEquity"),
+        "return_on_equity": info.get("returnOnEquity"),
+        "free_cash_flow": info.get("freeCashflow"),
+        "ebitda": info.get("ebitda"),
+        "total_revenue": info.get("totalRevenue"),
+        "revenue_growth": info.get("revenueGrowth"),
+        "profit_margins": info.get("profitMargins"),
+    }
 
-      q_balance_sheet = ticker_obj.quarterly_balance_sheet
-      if not q_balance_sheet.empty:
-          financials["balance_sheet"] = q_balance_sheet.fillna(0).to_dict()
-  except Exception as e:
-      print(f"Warning: Could not fetch detailed India financial statements: {e}")
+    financials = {}
+    try:
+        q_financials = ticker_obj.quarterly_financials
+        if not q_financials.empty:
+            q_financials.columns = q_financials.columns.astype(str)
+            financials["income_statement"] = q_financials.fillna(0).to_dict()
 
-  # 4. Return consolidated payload to state
-  return {
-      "fundamental_raw": {
-          "price_history": price_history,
-          "key_ratios": key_ratios,
-          "financial_statements": financials
-      }
-  }
-  
-  
-#Node 4c:
+        q_balance_sheet = ticker_obj.quarterly_balance_sheet
+        if not q_balance_sheet.empty:
+            q_balance_sheet.columns = q_balance_sheet.columns.astype(str)
+            financials["balance_sheet"] = q_balance_sheet.fillna(0).to_dict()
+    except Exception as e:
+        print(f"Warning: Could not fetch detailed India financial statements: {e}")
+
+    return {
+        "fundamental_raw": {
+            "price_history": price_history,
+            "key_ratios": key_ratios,
+            "financial_statements": financials
+        }
+    }
+
+
+# Node 4c: Social Sentiment India
 def india_X_reddit(state: AgentState) -> dict:
-  print("India X/Reddit Node: State: ", state)
-  choice = state.user_choice
-  stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
-  lookback_days = choice.lookback_days
+    print("India X/Reddit Node: ")
+    choice = state.user_choice
+    stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
+    lookback_days = choice.lookback_days
 
-  search = TavilySearch(max_results= 15)
-  reddit_context = None
-  x_context = None
+    search = TavilySearch(max_results=15)
+    reddit_context = None
+    x_context = None
 
-  try:
-    reddit_context = search.invoke({
-      "query": f"{stock_name} stock for last {lookback_days} days",
-      "include_domains": ["reddit.com/r/IndianStockMarket", "reddit.com/r/IndianStreetBets"]
-    })
+    try:
+        reddit_context = search.invoke({
+            "query": f"{stock_name} stock for last {lookback_days} days",
+            "include_domains": ["reddit.com/r/IndianStockMarket", "reddit.com/r/IndianStreetBets"]
+        })
 
-    x_context = search.invoke({
-        "query": f"{stock_name} stock for last {lookback_days} days",
-        "include_domains": ["x.com", "moneycontrol.com", "nseindia.com"]
-    })
+        x_context = search.invoke({
+            "query": f"{stock_name} stock for last {lookback_days} days",
+            "include_domains": ["x.com", "moneycontrol.com", "nseindia.com"]
+        })
+    except Exception as e:
+        print(f"Warning: Could not fetch India social sentiment data: {e}")
 
-  except Exception as e:
-    print(f"Warning: Could not fetch India social sentiment data: {e}")
-
-  if reddit_context is None:
-    reddit_context = {}
-  if x_context is None:
-    x_context = {}
-
-  return {
-      "social_raw": {
-            "reddit": reddit_context,
-            "x": x_context
+    return {
+        "social_raw": {
+            "reddit": reddit_context or {},
+            "x": x_context or {}
         }
-  }
-  
-  
-#Node 4d:
+    }
+
+
+# Node 4d: US Fundamental Data
 def us_fundamental(state: AgentState) -> dict:
-  print("US Node: State: ", state)
-  choice = state.user_choice
-  stock_name = choice.ticker
-  lookback_days = choice.lookback_days
+    print("US Fundamental Node: ")
+    choice = state.user_choice
+    stock_name = choice.ticker
+    lookback_days = choice.lookback_days
 
-  ticker_obj = yf.Ticker(stock_name)
-  history_df = ticker_obj.history(period=f"{lookback_days}d")
+    ticker_obj = yf.Ticker(stock_name)
+    history_df = ticker_obj.history(period=f"{lookback_days}d")
+    
+    # 1. Reset index to turn Date/Datetime into an explicit column
+    history_df = history_df.reset_index()
 
-  price_history = history_df.to_dict(orient="records")
+    # 2. Convert all datetime/timestamp columns to ISO string format
+    for col in history_df.select_dtypes(include=["datetime64", "datetimetz"]).columns:
+        history_df[col] = history_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-  info = ticker_obj.info or {}
-  key_ratios = {
-      "current_price": info.get("currentPrice") or info.get("previousClose"),
-      "market_cap": info.get("marketCap"),
-      "pe_ratio": info.get("trailingPE"),
-      "forward_pe": info.get("forwardPE"),
-      "peg_ratio": info.get("pegRatio"),
-      "price_to_book": info.get("priceToBook"),
-      "debt_to_equity": info.get("debtToEquity"),
-      "return_on_equity": info.get("returnOnEquity"),
-      "free_cash_flow": info.get("freeCashflow"),
-      "ebitda": info.get("ebitda"),
-      "total_revenue": info.get("totalRevenue"),
-      "revenue_growth": info.get("revenueGrowth"),
-      "profit_margins": info.get("profitMargins"),
-  }
+    # 3. Clean native Python dict records (safe for state & JSON serialization)
+    price_history = history_df.to_dict(orient="records")
 
-  # 3. Extract Recent Financial Statements (Quarterly)
-  # Convert DataFrames to string/dict representations safely
-  financials = {}
-  try:
-      q_financials = ticker_obj.quarterly_financials
-      if not q_financials.empty:
-          # Take top key lines (e.g., Total Revenue, Net Income)
-          financials["income_statement"] = q_financials.fillna(0).to_dict()
+    info = ticker_obj.info or {}
+    key_ratios = {
+        "current_price": info.get("currentPrice") or info.get("previousClose"),
+        "market_cap": info.get("marketCap"),
+        "pe_ratio": info.get("trailingPE"),
+        "forward_pe": info.get("forwardPE"),
+        "peg_ratio": info.get("pegRatio"),
+        "price_to_book": info.get("priceToBook"),
+        "debt_to_equity": info.get("debtToEquity"),
+        "return_on_equity": info.get("returnOnEquity"),
+        "free_cash_flow": info.get("freeCashflow"),
+        "ebitda": info.get("ebitda"),
+        "total_revenue": info.get("totalRevenue"),
+        "revenue_growth": info.get("revenueGrowth"),
+        "profit_margins": info.get("profitMargins"),
+    }
 
-      q_balance_sheet = ticker_obj.quarterly_balance_sheet
-      if not q_balance_sheet.empty:
-          financials["balance_sheet"] = q_balance_sheet.fillna(0).to_dict()
-  except Exception as e:
-      print(f"Warning: Could not fetch detailed US financial statements: {e}")
+    financials = {}
+    try:
+        q_financials = ticker_obj.quarterly_financials
+        if not q_financials.empty:
+            q_financials.columns = q_financials.columns.astype(str)
+            financials["income_statement"] = q_financials.fillna(0).to_dict()
 
-  # 4. Return consolidated payload to state
-  return {
-      "fundamental_raw": {
-          "price_history": price_history,
-          "key_ratios": key_ratios,
-          "financial_statements": financials
-      }
-  }
-  
+        q_balance_sheet = ticker_obj.quarterly_balance_sheet
+        if not q_balance_sheet.empty:
+            q_balance_sheet.columns = q_balance_sheet.columns.astype(str)
+            financials["balance_sheet"] = q_balance_sheet.fillna(0).to_dict()
+    except Exception as e:
+        print(f"Warning: Could not fetch detailed US financial statements: {e}")
 
-#Node 4e:
-def us_X_reddit(state: AgentState) -> dict:
-  print("US X/Reddit Node: State: ", state)
-  choice = state.user_choice
-  stock_name = choice.ticker
-  lookback_days = choice.lookback_days
-
-  search = TavilySearch(max_results= 15)
-  reddit_context = None
-  x_context = None
-
-  try:
-    reddit_context = search.invoke({
-      "query": f"{stock_name} stock for last {lookback_days} days",
-      "include_domains": ["reddit.com/r/wallstreetbets", "reddit.com/r/stocks"]
-    })
-
-    x_context = search.invoke({
-        "query": f"{stock_name} stock for last {lookback_days} days",
-        "include_domains": ["x.com", "robinhood.com", "cnbc.com"]
-    })
-
-  except Exception as e:
-    print(f"Warning: Could not fetch US social sentiment data: {e}")
-
-  if reddit_context is None:
-    reddit_context = {}
-  if x_context is None:
-    x_context = {}
-
-  return {
-      "social_raw": {
-            "reddit": reddit_context,
-            "x": x_context
+    return {
+        "fundamental_raw": {
+            "price_history": price_history,
+            "key_ratios": key_ratios,
+            "financial_statements": financials
         }
-  }
+    }
 
-#Node 5:
+
+# Node 4e: US Social Sentiment
+def us_X_reddit(state: AgentState) -> dict:
+    print("US X/Reddit Node: ")
+    choice = state.user_choice
+    stock_name = choice.ticker
+    lookback_days = choice.lookback_days
+
+    search = TavilySearch(max_results=15)
+    reddit_context = None
+    x_context = None
+
+    try:
+        reddit_context = search.invoke({
+            "query": f"{stock_name} stock for last {lookback_days} days",
+            "include_domains": ["reddit.com/r/wallstreetbets", "reddit.com/r/stocks"]
+        })
+
+        x_context = search.invoke({
+            "query": f"{stock_name} stock for last {lookback_days} days",
+            "include_domains": ["x.com", "robinhood.com", "cnbc.com"]
+        })
+    except Exception as e:
+        print(f"Warning: Could not fetch US social sentiment data: {e}")
+
+    return {
+        "social_raw": {
+            "reddit": reddit_context or {},
+            "x": x_context or {}
+        }
+    }
+
+
+# Node 5: State Consolidation
 def state_consolidation(state: AgentState) -> dict:
-  print("State Consolidation Node", state)
+    print("State Consolidation Node")
 
-  #Converting the fundamental data into a markdown file
-  fundamental = getattr(state, "fundamental_raw", {})
-  raw_history = fundamental.get("price_history", [])
-  key_ratios = fundamental.get("key_ratios", [])
-  financials = fundamental.get("financial_statements", [])
+    fundamental = state.fundamental_raw or {}
+    raw_history = fundamental.get("price_history", [])
+    key_ratios = fundamental.get("key_ratios", {})
+    financials = fundamental.get("financial_statements", {})
 
-  history_md = None
-  ratios_md = None
-  financials_md = None
+    history_md, ratios_md, financials_md = None, None, None
 
-  #Price history
-  try:
-    df_history = pd.DataFrame(raw_history)
-    df_history = df_history.round(2)
-    history_md = df_history.to_markdown(index=False)
-  except ValueError as e:
-    print("Error in History MD", e)
+    try:
+        df_history = pd.DataFrame(raw_history).round(2)
+        history_md = df_history.to_markdown(index=False)
+    except Exception as e:
+        print("Error in History MD", e)
 
-  #Key_ratios
-  try:
-    df_ratios = pd.DataFrame(key_ratios, index=[0])
-    df_ratios = df_ratios.round(2)
-    ratios_md = df_ratios.to_markdown(index=False)
-  except ValueError as e:
-    print("Error in Key Ratios MD", e)
+    try:
+        df_ratios = pd.DataFrame([key_ratios]).round(2)
+        ratios_md = df_ratios.to_markdown(index=False)
+    except Exception as e:
+        print("Error in Key Ratios MD", e)
 
-  #Financial_statements
-  try:
-    df_statements = pd.DataFrame(financials)
-    df_statements = df_statements.round(2)
-    financials_md = df_statements.to_markdown(index=False)
-  except ValueError as e:
-    print("Error in Financials MD", e)
+    try:
+        df_statements = pd.DataFrame(financials).round(2)
+        financials_md = df_statements.to_markdown(index=False)
+    except Exception as e:
+        print("Error in Financials MD", e)
 
-  #Cleaing the Social data
-  frontend_citations = []
-  social_dump = getattr(state, "social_raw", {})
-  reddit_data = social_dump.get("reddit", {})
-  x_data = social_dump.get("x", {})
+    frontend_citations = []
+    social_dump = state.social_raw or {}
+    reddit_data = social_dump.get("reddit", {})
+    x_data = social_dump.get("x", {})
 
-  # Markdown tracking blocks for the LLM prompt
-  social_markdown = ["### 📱 Social Media Sentiment (Reddit & X):"]
-  institutional_markdown = ["### 🏛️ Corporate & Market News Feeds (NSE, MoneyControl, etc.):"]
+    social_markdown = ["### 📱 Social Media Sentiment (Reddit & X):"]
+    institutional_markdown = ["### 🏛️ Corporate & Market News Feeds:"]
 
-  # Helper utility to categorize and name the source based on the URL
-  def parse_source(url: str) -> tuple[str, str]:
-      url_lower = url.lower()
-      if "reddit.com" in url_lower:
-          return "Social Media", "Reddit"
-      elif "x.com" in url_lower or "twitter.com" in url_lower:
-          return "Social Media", "X (Twitter)"
-      elif "nseindia.com" in url_lower:
-          return "Institutional/News", "NSE India"
-      elif "moneycontrol.com" in url_lower:
-          return "Institutional/News", "MoneyControl"
-      else:
-          return "Institutional/News", "Web Result"
+    def parse_source(url: str) -> tuple[str, str]:
+        url_lower = url.lower()
+        if "reddit.com" in url_lower:
+            return "Social Media", "Reddit"
+        elif "x.com" in url_lower or "twitter.com" in url_lower:
+            return "Social Media", "X (Twitter)"
+        elif "nseindia.com" in url_lower:
+            return "Institutional/News", "NSE India"
+        elif "moneycontrol.com" in url_lower:
+            return "Institutional/News", "MoneyControl"
+        else:
+            return "Institutional/News", "Web Result"
 
-  all_results = (reddit_data["results"] or []) + (x_data["results"] or [])
+    all_results = (reddit_data.get("results", []) or []) + (x_data.get("results", []) or [])
 
-  print("State Consolidation Node: All: ", all_results)
+    for item in all_results:
+        url = item.get("url", "")
+        title = item.get("title", "No Title Available").strip()
+        content = item.get("content", "").strip()
 
-  for item in all_results:
-      url = item.get("url", "")
-      title = item.get("title", "No Title Available").strip()
-      content = item.get("content", "").strip()
+        if not url:
+            continue
 
-      if not url:
-          continue
+        category, source_name = parse_source(url)
 
-      category, source_name = parse_source(url)
+        frontend_citations.append({
+            "category": category,
+            "source_name": source_name,
+            "title": title,
+            "url": url,
+            "content": content
+        })
 
-      # 1. Build the clean structured payload for the UI cards
-      frontend_citations.append({
-          "category": category,
-          "source_name": source_name,
-          "title": title,
-          "url": url,
-          "content": content
-      })
+        if category == "Social Media":
+            social_markdown.append(f"- **[{source_name}]** {title}\n  *Snippet*: {content}\n")
+        else:
+            institutional_markdown.append(f"- **[{source_name}]** {title}\n  *Context*: {content}\n")
 
-      # 2. Sort the markdown formatting strings so the LLM stays focused
-      if category == "Social Media":
-          social_markdown.append(f"- **[{source_name}]** {title}\n  *Snippet*: {content}\n")
-      else:
-          institutional_markdown.append(f"- **[{source_name}]** {title}\n  *Context*: {content}\n")
-
-  # Combine the separate markdown blocks into a single string for your Analyst
-  final_llm_markdown = "## COMPREHENSIVE WEB & SOCIAL DATA OVERVIEW\n\n" + \
+    final_llm_markdown = "## COMPREHENSIVE WEB & SOCIAL DATA OVERVIEW\n\n" + \
                         "\n".join(social_markdown) + "\n\n" + \
                         "\n".join(institutional_markdown)
 
-  return {
-      "standardized_fundamentals": {
-          "price_history": history_md,
-          "key_ratios": ratios_md,
-          "financial_statements": financials_md
-      },
-      "standardized_social_dump": final_llm_markdown,
-      "source_citations": frontend_citations,
-  }
+    return {
+        "standardized_fundamentals": {
+            "price_history": history_md,
+            "key_ratios": ratios_md,
+            "financial_statements": financials_md
+        },
+        "standardized_social_dump": final_llm_markdown,
+        "source_citations": frontend_citations,
+    }
 
-#Node 6a:
+
+# Node 6a: Social Analyst
 def social_momentum_analyst(state: AgentState) -> dict:
-  print("Social Momentum Analyst Node: State: ", state.standardized_social_dump)
-  if not state.standardized_social_dump:
-    return {
-        "messages" : [
-            AIMessage(content= "Insufficient social data for this stock ticker").model_dump()
-        ],
-        "social_momentum_analysis": {
-            "momentum_score": 0.0,
-            "sentiment_label": "Neutral (No Data)",
-            "executive_summary": "No social media or news data was available for analysis."
+    if not state.standardized_social_dump:
+        return {
+            "messages": [AIMessage(content="Insufficient social data for this stock ticker")],
+            "social_momentum_analysis": SocialMomentumAnalysis(
+                momentum_score=0.0,
+                sentiment_label="Neutral (No Data)",
+                executive_summary="No social media or news data was available for analysis."
+            )
         }
+
+    structured_llm = analysis_model.with_structured_output(SocialMomentumAnalysis).with_retry(
+        stop_after_attempt=2, wait_exponential_jitter=True
+    )
+
+    formatted_prompt = SOCIAL_MOMENTUM_ANALYST_PROMPT.format(
+        consolidated_markdown_data=state.standardized_social_dump
+    )
+
+    analysis_result = None
+    try:
+        analysis_result = structured_llm.invoke(formatted_prompt)
+    except Exception as e:
+        print(f"Error in Social Momentum Analyst LLM: {e}")
+
+    return {
+        "messages": [AIMessage(content="Analysis data ready to be displayed.")],
+        "social_momentum_analysis": analysis_result
     }
 
-  structured_llm = analysis_model.with_structured_output(SocialMomentumAnalysis)
 
-  # 2. Attach .with_retry() to the structured runnable second
-  social_llm = structured_llm.with_retry(
-      stop_after_attempt=2,
-      wait_exponential_jitter=True
-  )
-
-  formatted_prompt = SOCIAL_MOMENTUM_ANALYST_PROMPT.format(
-      consolidated_markdown_data = state.standardized_social_dump)
-
-  print(f"Formatted Prompt: {formatted_prompt}")
-
-  analysis_result = None
-
-  try:
-    analysis_result = social_llm.invoke(formatted_prompt)
-  except Exception as e:
-    print(f"Error in Social Momentum Analyst LLM instance: {e}")
-  finally:
-    if analysis_result:
-      analysis_result = analysis_result.model_dump_json(indent=2)
-    else:
-        analysis_result = {
-            "status": "ERROR",
-            "summary": "Analysis unavailable due to upstream API error.",
-            "sentiment_score": 0.0
-        }
-
-  return {
-      "messages": [
-          AIMessage(content="Analysis data ready to be displayed.").model_dump()
-      ],
-      "social_momentum_analysis": analysis_result
-  }
-
-#Node 6b:
+# Node 6b: Quant Analyst
 def quantitative_valuation_analyst(state: AgentState) -> dict:
-  print("Quantitative Valuation Analyst Node: State: ", state.standardized_fundamentals)
-
-  if not state.standardized_fundamentals:
-    return {
-        "messages" : [
-            AIMessage(content= "Insufficient fundamental data for this stock ticker").model_dump()
-        ],
-        "quantitative_valuation_analysis": {
-            "momentum_score": 0.0,
-            "sentiment_label": "Neutral (No Data)",
-            "executive_summary": "No fundamental data was available for analysis."
+    if not state.standardized_fundamentals:
+        return {
+            "messages": [AIMessage(content="Insufficient fundamental data for this stock ticker")],
+            "quantitative_valuation_analysis": QuantitativeValuationAnalysis(
+                momentum_score=0.0,
+                sentiment_label="Neutral (No Data)",
+                executive_summary="No fundamental data was available for analysis."
+            )
         }
+
+    fundamentals = state.standardized_fundamentals
+    final_md = f"{fundamentals.get('price_history', '')}\n\n{fundamentals.get('financial_statements', '')}\n\n{fundamentals.get('key_ratios', '')}"
+
+    structured_llm = analysis_model.with_structured_output(QuantitativeValuationAnalysis).with_retry(
+        stop_after_attempt=2, wait_exponential_jitter=True
+    )
+
+    formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(fundamental_data_markdown=final_md)
+
+    analysis_result = None
+    try:
+        analysis_result = structured_llm.invoke(formatted_prompt)
+    except Exception as e:
+        print(f"Error in Quantitative Valuation Analyst LLM: {e}")
+
+    return {
+        "messages": [AIMessage(content="Quantitative analysis data ready to be displayed.")],
+        "quantitative_valuation_analysis": analysis_result
     }
 
-  final_md = state.standardized_fundamentals['price_history'] + "\n\n" + state.standardized_fundamentals['financial_statements'] + "\n\n" + state.standardized_fundamentals['key_ratios']
 
-  structured_llm = analysis_model.with_structured_output(QuantitativeValuationAnalysis)
-
-  # 2. Attach .with_retry() to the structured runnable second
-  quant_llm = structured_llm.with_retry(
-      stop_after_attempt=2,
-      wait_exponential_jitter=True
-  )
-
-  formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(fundamental_data_markdown=final_md)
-
-  print(f"Formatted Prompt Quant: {formatted_prompt}")
-
-  analysis_result = None
-
-  try:
-    analysis_result = quant_llm.invoke(formatted_prompt)
-  except Exception as e:
-    print(f"Error in Quantitative Valuation Analyst LLM instance: {e}")
-  finally:
-    if analysis_result:
-      analysis_result = analysis_result.model_dump_json(indent=2)
-    else:
-        analysis_result = {
-            "status": "ERROR",
-            "summary": "Analysis unavailable due to upstream API error.",
-            "sentiment_score": 0.0
-        }
-
-  return {
-      "messages": [
-          AIMessage(content="Quantitative analysis data ready to be displayed.").model_dump()
-      ],
-      "quantitative_valuation_analysis": analysis_result
-  }
-
-
-#Node 7:
+# Node 7: Orchestrator
 def orchestrator(state: AgentState) -> dict:
-  print("Orchestrator/Risk Critic Agent Node: State: ", state)
-  if not state.quantitative_valuation_analysis or not state.social_momentum_analysis:
+    if not state.quantitative_valuation_analysis or not state.social_momentum_analysis:
+        return {
+            "messages": [AIMessage(content="Insufficient data for analysis.")],
+            "dissonance_score": 0,
+            "orchestrator_summary": "Insufficient data for analysis."
+        }
+
+    formatted_prompt = ORCHESTRATOR_PROMPT.format(
+        quant_analysis=state.quantitative_valuation_analysis,
+        social_analysis=state.social_momentum_analysis
+    )
+
+    structured_llm = model_with_tools.with_structured_output(OrchestratorOutput)
+
+    response = None
+    try:
+        response = structured_llm.invoke(formatted_prompt)
+    except Exception as e:
+        print(f"Error in Orchestrator LLM: {e}")
+
     return {
-        "messages": [AIMessage(content="Insufficient data for analysis.").model_dump()],
-        "dissonance_score": 0,
-        "executive_summary": "Insufficient data for analysis."
+        "orchestrator_summary": response.executive_summary if response else "No data available",
+        "dissonance_score": response.dissonance_score if response else 0
     }
-  quant_report = state.quantitative_valuation_analysis
-  social_report = state.social_momentum_analysis
 
-  # Format the prompt
-  formatted_prompt = ORCHESTRATOR_PROMPT.format(
-      quant_analysis=quant_report,
-      social_analysis=social_report
-  )
 
-  # Force structured output execution
-  structured_llm = model_with_tools.with_structured_output(OrchestratorOutput)
+# Node 8: Contradict Router
+def contradict_router(state: AgentState) -> str:
+    score = state.dissonance_score or 0
+    recal_count = state.recalibration_count or 0
 
-  response = None
-  orchestrator_summary = None
-  dissonance_score = None
-
-  try:
-    response = structured_llm.invoke(formatted_prompt)
-  except Exception as e:
-    print(f"Error in Orchestrator LLM instance: {e}")
-  finally:
-    if response:
-      orchestrator_summary = getattr(response,"executive_summary","NOT_FOUND")
-      dissonance_score = getattr(response, "dissonance_score",0)
-    else:
-      orchestrator_summary = "No data available for analysis."
-      dissonance_score = 0
-
-  print(f"Orchestrator Evaluation Complete. Dissonance Score: {dissonance_score}/10")
-
-  return {
-      "orchestrator_summary": orchestrator_summary,
-      "dissonance_score": dissonance_score
-  }
-
-#Node 8:
-def contradict_router(state: AgentState) -> dict:
-  print("Contradictory Agent Node Router: State: ", state)
-  score = state.dissonance_score
-  recal_count = state.recalibration_count or 0
-
-  if not score:
-    return "no"
-  elif score >= 7 and recal_count > 1 :
-    return "yes"
-  else:
+    if score >= 7 and recal_count > 1:
+        return "yes"
     return "no"
 
-#Node 9:
+
+# Node 9: Adjust Confidence Weights
 def adjust_confidence_weights(state: AgentState) -> dict:
-  print("Adjust Confidence Weights Node: State: ", state)
+    dissonance = state.dissonance_score or 0.5
+    current_recalibrations = state.recalibration_count or 0
 
-  dissonance = state.dissonance_score or 0.5
-  current_recalibrations = state.recalibration_count or 0
+    dissonance_penalty = (dissonance / 10.0) * 0.4
+    new_social_weight = max(0.1, round(0.5 - dissonance_penalty, 2))
+    new_quant_weight = round(1.0 - new_social_weight, 2)
 
-  dissonance_penalty = (dissonance / 10.0) * 0.4
+    return {
+        "quant_weight": new_quant_weight,
+        "social_weight": new_social_weight,
+        "recalibration_count": current_recalibrations + 1
+    }
 
-  new_social_weight = max(0.1, round(0.5 - dissonance_penalty, 2))
-  new_quant_weight = round(1.0 - new_social_weight, 2)
 
-  print(f"⚠️ High Dissonance ({dissonance}/10) Detected!")
-  print(f"🔄 Recalibrated Weights -> Quantitative: {new_quant_weight} | Social: {new_social_weight}")
-
-  # 2. Return updated weights & bump iteration count
-  return {
-      "quant_weight": new_quant_weight,
-      "social_weight": new_social_weight,
-      "recalibration_count": current_recalibrations + 1
-  }
-
-#Node 10:
+# Node 10: Action Payload
 def action_payload(state: AgentState) -> dict:
-  print("Action Payload Node: ")
+    ticker = state.user_choice.ticker if state.user_choice else "NOT_FOUND"
+    orchestrator_summary = state.orchestrator_summary or "NOT_FOUND"
+    quant_weight = state.quant_weight or 0.5
+    social_weight = state.social_weight or 0.5
+    dissonance_score = state.dissonance_score or 0
 
-  ticker = state.user_choice.ticker or "NOT_FOUND"
-  orchestrator_summary = state.orchestrator_summary or "NOT_FOUND"
-  quant_weight = state.quant_weight or 0.5
-  source_citations = state.source_citations
-  social_weight = state.social_weight or 0.5
-  dissonance_score = state.dissonance_score or 0
+    formatted_prompt = ACTION_PAYLOAD_PROMPT.format(
+        ticker=ticker,
+        orchestrator_summary=orchestrator_summary,
+        quant_weight=quant_weight,
+        social_weight=social_weight,
+        dissonance_score=dissonance_score
+    )
 
-  formatted_prompt = ACTION_PAYLOAD_PROMPT.format(
-      ticker=ticker,
-      orchestrator_summary=orchestrator_summary,
-      quant_weight=quant_weight,
-      social_weight=social_weight,
-      dissonance_score=dissonance_score
-  )
+    structured_llm = model_with_tools.with_structured_output(InvestmentActionPayload)
 
-  # Enforce structured output from LLM
-  structured_llm = model_with_tools.with_structured_output(InvestmentActionPayload)
+    response = None
+    try:
+        response = structured_llm.invoke(formatted_prompt)
+    except Exception as e:
+        print(f"Error in Action Payload LLM: {e}")
 
-  response = None
-  payload_dict= None
-
-  try:
-    response = structured_llm.invoke(formatted_prompt)
-  except Exception as e:
-    print(f"Error in Action Payload LLM instance: {e}")
-  finally:
     if not response:
-      payload_dict = {
-          "ticker": ticker,
-          "action": "HOLD",
-          "confidence_score": 0.5,
-          "risk_level": "LOW",
-          "reasoning_summary": "No data available for analysis.",
-          "key_catalysts": [],
-          "invalidation_rules": [],
-          "weights_applied": {
-              "quantitative": quant_weight,
-              "social": social_weight
-          },
-          "source_citations": []
-      }
+        payload_dict = {
+            "ticker": ticker,
+            "action": "HOLD",
+            "confidence_score": 0.5,
+            "risk_level": "LOW",
+            "reasoning_summary": "No data available for analysis.",
+            "key_catalysts": [],
+            "invalidation_rules": [],
+            "weights_applied": {"quantitative": quant_weight, "social": social_weight},
+            "source_citations": []
+        }
     else:
-      # Convert Pydantic object to dictionary and append applied weights
-      payload_dict = response.model_dump()
-      payload_dict["weights_applied"] = {
-          "quantitative": quant_weight,
-          "social": social_weight
-      }
-      payload_dict["source_citations"] = {
-        source_citations
-      }
+        payload_dict = response.model_dump()
+        payload_dict["weights_applied"] = {"quantitative": quant_weight, "social": social_weight}
+        payload_dict["source_citations"] = state.source_citations or []  # Fixed list syntax!
 
-  print(f"✅ Action Payload Generated: {payload_dict['action']} for {payload_dict['ticker']} (Confidence: {payload_dict['confidence_score']})")
+    return {
+        "final_action_payload": payload_dict
+    }
 
-  return {
-      "final_action_payload": payload_dict
-  }
-  
-#Node 11:
-# def send_action_json(state: AgentState) -> dict:
-  print("Send Action Node: ")
 
-  payload = state.final_action_payload or {}
+# Node 11: Send Action
+def send_action_json(state: AgentState) -> dict:
+    payload = state.final_action_payload or {}
 
-  if not payload:
-      print("❌ Error: No payload found in state to send.")
-      return {
-          "payload_sent": False,
-          "api_response_status": 500,
-          "payload": ""
-      }
+    if not payload:
+        return {
+            "payload_sent": False,
+            "api_response_status": 500,
+            "payload": ""
+        }
 
-  formatted_json = None
+    formatted_json = json.dumps(payload, indent=2)
 
-  # 1. Ensure clean JSON string conversion
-  if hasattr(payload, "model_dump_json"):
-    formatted_json = payload.model_dump_json(indent=2)
-  elif hasattr(payload, "model_dump"):
-      formatted_json = json.dumps(payload.model_dump(), indent=2)
-  else:
-      formatted_json = json.dumps(payload, indent=2)
-
-  # 2. Output
-  print("🚀 Transmitting JSON Payload to API Endpoint:")
-  print(formatted_json)
-
-  return {
-      "payload_sent": True,
-      "payload": formatted_json,
-      "api_response_status": 200
-  }
+    return {
+        "payload_sent": True,
+        "payload": formatted_json,
+        "api_response_status": 200
+    }

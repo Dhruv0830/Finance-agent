@@ -84,7 +84,7 @@ export default function AnalyseDashboard() {
 
   // State typed as ChoiceOption[]
   const [hitlChoices, setHitlChoices] = useState<ChoiceOption[] | null>(null);
-
+  const [threadId, setThreadId] = useState<string>("");
   // Data State
   const [nodes, setNodes] = useState<NodeStatus[]>([]);
   const [streamText, setStreamText] = useState("");
@@ -142,7 +142,7 @@ export default function AnalyseDashboard() {
           return {
             ...node,
             status: "running",
-            nodeStreamText: (node.nodeStreamText || "") + chunkContent,
+            nodeStreamText: chunkContent,
           };
         }
         return node;
@@ -176,6 +176,20 @@ export default function AnalyseDashboard() {
       const chunk = decoder.decode(value, { stream: true });
       accumulated += chunk;
       setStreamText((prev) => prev + chunk);
+
+      // Get thread id
+
+      if (chunk.includes("thread_id")) {
+        try {
+          const threadIdMatch = chunk.match(/"thread_id"\s*:\s*"([^"]+)"/);
+          if (threadIdMatch && threadIdMatch[1]) {
+            const parsedChoices: string = threadIdMatch[1];
+            setThreadId(parsedChoices);
+          }
+        } catch (e) {
+          console.warn("Could not parse thread id JSON chunk:", e);
+        }
+      }
 
       // --- 1. Parse Choice / Human-in-the-Loop Options ---
       if (
@@ -296,7 +310,7 @@ export default function AnalyseDashboard() {
         },
         body: JSON.stringify({
           prompt: textToSend.trim(),
-          user_id: "user_123",
+          user_id: threadId,
           ...(activeEndpoint === "chat" && { context: finalReport }),
         }),
       });
@@ -353,7 +367,7 @@ export default function AnalyseDashboard() {
           },
           body: JSON.stringify({
             user_response: selectedChoice,
-            thread_id: "user_123",
+            thread_id: threadId,
           }),
         },
       );
@@ -383,6 +397,10 @@ export default function AnalyseDashboard() {
     }
   };
 
+  const saveChatConversation = () => {
+    alert("Conversation saved");
+  };
+
   const handlePromptClick = (text: string) => {
     setPrompt(text);
   };
@@ -391,10 +409,11 @@ export default function AnalyseDashboard() {
     <div className="flex h-screen bg-slate-50 dark:bg-[#07090E] text-slate-800 dark:text-slate-100 font-sans antialiased overflow-hidden transition-colors duration-200">
       {/* LEFT SIDEBAR */}
       {showSideBar && (
-        <aside className="w-75 bg-white dark:bg-[#0A0E17] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between p-4 relative shrink-0 transition-colors duration-200 z-30">
-          <div>
+        <aside className="w-75 h-screen bg-white dark:bg-[#0A0E17] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between p-4 relative shrink-0 transition-colors duration-200 z-30">
+          {/* Top Section (Fixed Header + Scrollable Threads) */}
+          <div className="flex-1 min-h-0 flex flex-col">
             {/* Logo Bar */}
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg border border-emerald-500/20">
                   <TrendingUp className="w-5 h-5" />
@@ -414,25 +433,29 @@ export default function AnalyseDashboard() {
             {/* New Analysis Button */}
             <button
               onClick={() => {
+                saveChatConversation();
                 setHasStarted(false);
                 setNodes([]);
+                setThreadId("");
                 setShowChatFloater(false);
                 setFinalReport(null);
                 setActiveEndpoint("analyse");
                 setIsGraphExpanded(true);
               }}
-              className="w-full bg-emerald-50 dark:bg-[#102019] hover:bg-emerald-100 dark:hover:bg-[#142B21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 rounded-xl py-3 px-4 text-xs font-semibold flex items-center justify-center gap-2 transition mb-4 shadow-sm"
+              className="w-full bg-emerald-50 dark:bg-[#102019] hover:bg-emerald-100 dark:hover:bg-[#142B21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 rounded-xl py-3 px-4 text-xs font-semibold flex items-center justify-center gap-2 transition mb-4 shadow-sm shrink-0"
             >
               <Plus className="w-4 h-4" />
               New Analysis
             </button>
 
-            {/* User Threads */}
-            <UserThreads />
+            {/* Scrollable User Threads Container */}
+            <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-1">
+              <UserThreads />
+            </div>
           </div>
 
-          {/* User Profile Area */}
-          <div className="relative border-t border-slate-200 dark:border-slate-800/60 pt-3">
+          {/* User Profile Area (Fixed at bottom) */}
+          <div className="relative border-t border-slate-200 dark:border-slate-800/60 pt-3 mt-3 shrink-0">
             {showProfileMenu && (
               <div className="absolute bottom-16 left-0 right-0 bg-white dark:bg-[#0E131F] border border-slate-200 dark:border-slate-800 rounded-2xl p-2 shadow-2xl space-y-1 z-20 backdrop-blur-md">
                 <Link

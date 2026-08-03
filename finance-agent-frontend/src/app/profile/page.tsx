@@ -168,7 +168,7 @@ export function UserThreads() {
         // );
 
         // =========================================================
-        // PRODUCTION ROUTE (COMMENTED OUT)
+        // PRODUCTION ROUTE
         // =========================================================
 
         const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie

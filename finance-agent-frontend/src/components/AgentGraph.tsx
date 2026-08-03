@@ -70,8 +70,7 @@ export const AgentGraph: React.FC<AgentGraphProps> = ({
         const isTerminal = isTerminalNode(node.name);
 
         const isHITL =
-          node.name === "ask_human_node" &&
-          Boolean(choices && choices.length > 0);
+          node.name === "ask_human" && Boolean(choices && choices.length > 0);
 
         return (
           <div

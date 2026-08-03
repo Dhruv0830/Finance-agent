@@ -1,16 +1,45 @@
 import json
 import os
+import importlib
 from typing import Dict, Any, Optional, Union
 from contextlib import asynccontextmanager
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from pydantic import BaseModel
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
 
 # Global singletons
 pool: Optional[AsyncConnectionPool] = None
 checkpointer: Optional[AsyncPostgresSaver] = None
 
+
+class PydanticJsonPlusSerializer(JsonPlusSerializer):
+    """
+    Custom Serde for LangGraph that automatically serializes Pydantic objects
+    for Postgres storage and hydrates them back into full Pydantic instances.
+    """
+    def _default(self, obj: Any) -> Any:
+        if isinstance(obj, BaseModel):
+            return {
+                "__pydantic_type__": f"{obj.__class__.__module__}.{obj.__class__.__qualname__}",
+                "data": obj.model_dump(mode="json")
+            }
+        return super()._default(obj)
+
+    def _reviver(self, value: Any) -> Any:
+        if isinstance(value, dict) and "__pydantic_type__" in value:
+            try:
+                module_name, class_name = value["__pydantic_type__"].rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                cls = getattr(module, class_name)
+                return cls(**value["data"])
+            except Exception as e:
+                print(f"Failed to revive Pydantic object {value.get('__pydantic_type__')}: {e}")
+                return value["data"]
+        return super()._reviver(value)
 
 def get_db_uri() -> str:
     uri = os.getenv("DATABASE_URL")
@@ -48,7 +77,7 @@ async def lifespan(app: FastAPI):
     await pool.open()
 
     # 2. Initialize LangGraph checkpointer using the same pool
-    checkpointer = AsyncPostgresSaver(pool)
+    checkpointer = AsyncPostgresSaver(pool, serde=PydanticJsonPlusSerializer())
     await checkpointer.setup()
     yield  # Application running
 

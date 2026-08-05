@@ -7,7 +7,7 @@ from langchain_tavily import TavilySearch
 
 from .tools import tool_array
 from .prompts import *
-from .config import analysis_model, chat_model
+from .config import analysis_model
 from .schemas import *
 
 # Bind Tools

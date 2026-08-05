@@ -180,6 +180,15 @@ async def update_thread_and_log_resume_input(
             )
             return True
 
+def dump_to_json(obj):
+    # Convert Pydantic models (v2 / v1)
+    if isinstance(obj, BaseModel):
+        return obj.model_dump() if hasattr(obj, "model_dump") else obj.dict()
+    # Convert custom dataclasses / objects with __dict__
+    if hasattr(obj, "__dict__"):
+        return obj.__dict__
+    # Fallback to str for non-serializable types like datetime/UUID
+    return str(obj)
 
 # =====================================================================
 # STEP 3: LOG AGENT OUTPUT / INTERMEDIATE STEPS
@@ -198,7 +207,7 @@ async def record_thread_message(
                 INSERT INTO public.thread_messages (thread_id, role, node_name, content, created_at)
                 VALUES (%s, %s, %s, %s::jsonb, NOW());
                 """,
-                (thread_id, role, node_name, json.dumps(content, default=str))
+                (thread_id, role, node_name, json.dumps(content, default=dump_to_json))
             )
             await conn.execute(
                 """
@@ -265,3 +274,28 @@ async def get_user_threads(user_id: str) -> list[dict]:
                     row["updated_at"] = row["updated_at"].isoformat()
                     
             return rows
+        
+# =====================================================================
+# FETCH USER CONVERSATION THREAD 
+# =====================================================================
+
+async def get_user_conversation(thread_id: str) -> list[dict]:
+    p = await get_pool()
+    async with p.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT 
+                    role, node_name, content
+                FROM thread_messages
+                WHERE thread_id = %s
+                AND content->'state' IS NOT NULL         
+                AND content->'state' != '{}'::jsonb 
+                AND content->'state' != 'null'::jsonb     
+                ORDER BY created_at ASC;
+                """,
+                (thread_id,)
+            )
+            rows = await cur.fetchall()      
+            return rows
+        

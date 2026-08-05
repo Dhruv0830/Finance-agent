@@ -2,15 +2,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, APIRouter, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 from typing import List, Optional, Dict, Any
 from sse_starlette.sse import EventSourceResponse
 from dotenv import load_dotenv
 load_dotenv()
-from analyse_agent.generators import analyse_stream_generator, resume_stream_generator, chat_stream_generator
+from rag_chat_agent.chat_agent import chat_with_report
+from analyse_agent.generators import analyse_stream_generator, resume_stream_generator
 from analyse_agent.db import get_user_conversation, create_thread_and_initial_message, update_thread_and_log_resume_input, get_user_threads
 from auth import get_current_user_id 
 import json
-from analyse_agent.db import lifespan 
+from analyse_agent.db import lifespan
+from rag_chat_agent.config import get_graph_config
 from demo import router as demo_router
 # Load variables from backend/.env
 
@@ -76,11 +79,18 @@ async def chat_endpoint(request: ChatRequest):
     """
     Streams conversational model responses using SSE.
     """
-    if not request.message.strip():
+    if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    return EventSourceResponse(
-        chat_stream_generator(request.message),
+    input_data = {
+        "messages": [("user", request.prompt)]
+    }
+
+    config = get_graph_config(thread_id= request.thread_id)
+
+    # Pass generator directly to StreamingResponse
+    return StreamingResponse(
+        chat_with_report(input_data, config),
         media_type="text/event-stream"
     )
 
@@ -208,13 +218,13 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
                 "node_name": item["node_name"],
                 "label": GRAPH_NODES.get(item["node_name"], item["node_name"]),
                 "status": "completed",
-                "nodeStreamText": item["content"] if item["node_name"] != "action_payload" else "",
+                "nodeStreamText": json.dumps(item["content"], default=str) if item["node_name"] != "action_payload" else "",
             })
         
         return {
             "agent_graph" : agent_graph,
             "final_report": final_report,
-            "chat": {}
+            "chat": []
             }
     
     except Exception as err:

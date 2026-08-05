@@ -1,5 +1,4 @@
 from langchain.chat_models import init_chat_model
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import os
 
 DEFAULT_RECURSION_LIMIT = 15
@@ -27,17 +26,7 @@ LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY')
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT")
 
 
-analysis_model = ChatNVIDIA(
-  model="nvidia/nemotron-3-ultra-550b-a55b",
-  temperature=0,
-)
-
-chat_model = init_chat_model(
+analysis_model = init_chat_model(
     "google_genai:gemini-2.5-flash",
     temperature=0,
 )
-
-# analysis_model = init_chat_model(
-#     "google_genai:gemini-2.5-flash",
-#     temperature=0,
-# )

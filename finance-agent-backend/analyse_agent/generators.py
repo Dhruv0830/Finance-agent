@@ -9,26 +9,6 @@ from .db import (
 
 # --- SSE Event Generators ---
 
-async def chat_stream_generator(prompt: str, config: dict) -> AsyncGenerator[dict, None]:
-    """
-    Simulates token-by-token streaming from an LLM.
-    Replace the dummy loop with your LLM provider call (e.g., OpenAI/LangChain async stream).
-    """
-    tokens = [] #This is where the agent call is placed 
-
-    for token in tokens:
-        yield {
-            "event": "message",
-            "data": json.dumps({"token": token})
-        }
-
-    # Signal stream completion
-    yield {
-        "event": "done",
-        "data": json.dumps({"status": "complete"})
-    }
-
-
 async def analyse_stream_generator(user_id: str, thread_id: str, prompt: str) -> AsyncGenerator[dict, None]:
     """
     1. Streams graph node updates and interrupts over SSE.
@@ -56,7 +36,7 @@ async def analyse_stream_generator(user_id: str, thread_id: str, prompt: str) ->
             data_payload = json.loads(chunk["data"])
 
             # Log intermediate node completion steps to thread_messages table
-            if event_type == "node_update":
+            if event_type == "node_update" and data_payload.get("state"):
                 await record_thread_message(
                     thread_id=thread_id,
                     role="assistant",
@@ -106,7 +86,7 @@ async def resume_stream_generator(user_response: dict, thread_id: str) -> AsyncG
                 raw_data_str = json.dumps(chunk["data"])
 
             # 3. Log intermediate node updates into thread_messages
-            if event_type == "node_update":
+            if event_type == "node_update" and data_payload.get("state"):
                 node_name = data_payload.get("node")
                 state = data_payload.get("state", {})
                 await record_thread_message(

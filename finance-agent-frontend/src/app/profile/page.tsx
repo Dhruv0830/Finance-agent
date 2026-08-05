@@ -1,10 +1,12 @@
 "use client";
 import { Search, Clock } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Dispatch, SetStateAction } from "react";
+import { FinalReportData } from "@/src/components/FinalReportCard";
 import { createClient } from "@/src/lib/supabase"; // Adjust path to your client
 import { SupabaseClient, User } from "@supabase/supabase-js";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RotateCw } from "lucide-react";
+import { NodeStatus, ChoiceOption } from "@/src/components/AgentGraph";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -114,6 +116,12 @@ export default function ProfilePage() {
   );
 }
 
+export interface ChatMessage {
+  id: string;
+  role: "chat_user" | "chat_agent";
+  content: string;
+}
+
 export interface Thread {
   thread_id: string;
   ticker: string;
@@ -136,14 +144,36 @@ export const getCookie = async (supabase: SupabaseClient): Promise<string> => {
   return token;
 };
 
-export function UserThreads() {
-  const [threads, setThreads] = useState<[]>([]);
-  const [activeThread, setActiveThread] = useState<string | null>(null);
+export function UserThreads({
+  setActiveEndpoint,
+  setChatMessages,
+  setHasStarted,
+  threadId,
+  setThreadId,
+  setFinalReport,
+  setIsReportExpanded,
+  setNodes,
+  setIsGraphExpanded,
+  setHitlChoices,
+}: {
+  setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>;
+  setActiveEndpoint: Dispatch<SetStateAction<"analyse" | "chat">>;
+  setHasStarted: Dispatch<SetStateAction<boolean>>;
+  threadId: string;
+  setThreadId: Dispatch<SetStateAction<string>>;
+  setFinalReport: Dispatch<SetStateAction<FinalReportData | null>>;
+  setIsReportExpanded: Dispatch<SetStateAction<boolean>>;
+  setNodes: Dispatch<SetStateAction<NodeStatus[]>>;
+  setIsGraphExpanded: Dispatch<SetStateAction<boolean>>;
+  setHitlChoices: Dispatch<SetStateAction<ChoiceOption[] | null>>;
+}) {
+  const [threads, setThreads] = useState<ThreadWithColor[]>([]);
   const [filteredAnalyses, setFilteredAnalyses] = useState<ThreadWithColor[]>(
     [],
   );
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const TAILWIND_COLOR_PALETTE = [
     "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
@@ -153,59 +183,58 @@ export function UserThreads() {
     "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
   ];
 
-  useEffect(() => {
-    async function getThreads() {
-      try {
-        setLoading(true);
-        // const response = await fetch(
-        //   `${process.env.NEXT_PUBLIC_API_URL}/threads`,
-        //   {
-        //     method: "GET",
-        //     headers: {
-        //       "Content-Type": "application/json",
-        //     },
-        //   },
-        // );
+  async function getThreads() {
+    try {
+      setLoading(true);
+      // const response = await fetch(
+      //   `${process.env.NEXT_PUBLIC_API_URL}/threads`,
+      //   {
+      //     method: "GET",
+      //     headers: {
+      //       "Content-Type": "application/json",
+      //     },
+      //   },
+      // );
 
-        // =========================================================
-        // PRODUCTION ROUTE
-        // =========================================================
+      // =========================================================
+      // PRODUCTION ROUTE
+      // =========================================================
 
-        const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads`,
-          {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
+      const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
-        );
+        },
+      );
 
-        if (!response.ok) {
-          console.log(`Failed to fetch threads: ${response.statusText}`);
-          return;
-        }
-
-        const data = await response.json();
-        const thread_with_colours = data?.threads?.map(
-          (thread: Thread, index: number): ThreadWithColor => ({
-            ...thread,
-            color:
-              TAILWIND_COLOR_PALETTE[index % TAILWIND_COLOR_PALETTE.length],
-          }),
-        );
-        setFilteredAnalyses(thread_with_colours || []);
-        setThreads(thread_with_colours || []);
-      } catch (err: any) {
-        console.error("Error fetching threads:", err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        console.log(`Failed to fetch threads: ${response.statusText}`);
+        return;
       }
-    }
 
+      const data = await response.json();
+      const thread_with_colours = data?.threads?.map(
+        (thread: Thread, index: number): ThreadWithColor => ({
+          ...thread,
+          color: TAILWIND_COLOR_PALETTE[index % TAILWIND_COLOR_PALETTE.length],
+        }),
+      );
+      setFilteredAnalyses(thread_with_colours || []);
+      setThreads(thread_with_colours || []);
+    } catch (err: any) {
+      console.error("Error fetching threads:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
     getThreads();
   }, []);
 
@@ -223,6 +252,65 @@ export function UserThreads() {
       );
     });
     setFilteredAnalyses(searchArray);
+  };
+
+  const handleReload = async () => {
+    setIsRefreshing(true);
+    setThreads([]);
+    setFilteredAnalyses([]);
+    try {
+      await getThreads();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const getConversationThread = async (threadId: string) => {
+    setNodes([]);
+    setHasStarted(true);
+    setFinalReport(null);
+    setThreadId("");
+    setActiveEndpoint("analyse");
+    try {
+      const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads/${threadId}/`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        console.log(
+          `Failed to fetch conversation thread: ${response.statusText}`,
+        );
+        setHasStarted(false);
+        return;
+      }
+      const data = await response.json();
+      setFinalReport(data?.final_report);
+      setNodes(data?.agent_graph);
+      setChatMessages(
+        data?.chat.map((msg: ChatMessage) => ({
+          id: msg.id,
+          role: msg.role as "chat_user" | "chat_agent",
+          content: msg.content,
+        })),
+      );
+    } catch (err: any) {
+      console.error("Error fetching conversation:", err);
+      setHasStarted(false);
+      setError(err.message);
+    } finally {
+      setThreadId(threadId);
+      setActiveEndpoint("chat");
+      setIsGraphExpanded(true);
+      setIsReportExpanded(true);
+    }
   };
 
   function timeAgo(dateString: string) {
@@ -268,16 +356,29 @@ export function UserThreads() {
 
       {/* Recent Conversations */}
       <div className="space-y-1">
-        <div className="text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase px-1 mb-2">
-          Recent
-        </div>
+        <div className="flex items-center justify-between px-1 mb-2">
+          <span className="text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+            Recent
+          </span>
 
+          <button
+            onClick={handleReload}
+            disabled={isRefreshing}
+            title="Reload Threads"
+            className="p-1 text-slate-400 hover:text-emerald-400 transition-colors rounded-md focus:outline-none disabled:opacity-50"
+          >
+            <RotateCw
+              className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-500" : ""}`}
+            />
+          </button>
+        </div>
+        <LoadingSpinner isLoading={loading} message="Fetching Threads..." />
         {filteredAnalyses.map((item: ThreadWithColor) => (
           <div
             key={item.thread_id}
-            onClick={() => setActiveThread(item.thread_id)}
+            onClick={() => getConversationThread((threadId = item.thread_id))}
             className={`p-3 rounded-xl border cursor-pointer transition relative ${
-              activeThread === item.thread_id
+              threadId === item.thread_id
                 ? "bg-slate-200 dark:bg-[#121A29] border-slate-300 dark:border-slate-700"
                 : "bg-slate-50 dark:bg-[#0E131F]/60 border-slate-200 dark:border-slate-800/40 hover:bg-slate-100 dark:hover:bg-[#121826]"
             }`}
@@ -307,3 +408,38 @@ export function UserThreads() {
     </>
   );
 }
+
+interface LoadingSpinnerProps {
+  isLoading: boolean;
+  message?: string;
+}
+
+export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
+  isLoading,
+  message = "Generating report...",
+}) => {
+  if (!isLoading) return null;
+
+  return (
+    <div className="flex flex-col items-center justify-center p-8 space-y-4">
+      {/* Outer Glow & Spinner Container */}
+      <div className="relative flex items-center justify-center">
+        {/* Pulsing Emerald Glow Background */}
+        <div className="absolute w-12 h-12 rounded-full bg-emerald-500/20 animate-ping" />
+
+        {/* Outer Spinning Ring */}
+        <div className="w-12 h-12 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 border-r-emerald-500 animate-spin" />
+
+        {/* Inner Solid Accent Dot */}
+        <div className="absolute w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+      </div>
+
+      {/* Loading Label */}
+      {message && (
+        <p className="text-sm font-medium text-emerald-400/90 animate-pulse tracking-wide">
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};

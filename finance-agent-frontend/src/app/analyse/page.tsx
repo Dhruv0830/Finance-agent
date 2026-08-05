@@ -35,6 +35,8 @@ import {
 import {
   UserThreads,
   getCookie,
+  ChatMessage,
+  LoadingSpinner,
   ThreadWithColor,
   Thread,
 } from "../profile/page";
@@ -65,6 +67,7 @@ export default function AnalyseDashboard() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showSideBar, setShowSideBar] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const supabase = createClient();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -288,16 +291,28 @@ export default function AnalyseDashboard() {
     setPrompt("");
     setIsAnalyzing(true);
 
-    const endpoint =
-      activeEndpoint === "analyse"
-        ? `${process.env.NEXT_PUBLIC_API_URL}/api/finance/analyse`
-        : `${process.env.NEXT_PUBLIC_API_URL}/api/finance/chat`;
+    const isChat = activeEndpoint === "chat";
+    const endpoint = isChat
+      ? `${process.env.NEXT_PUBLIC_API_URL}/api/finance/chat`
+      : `${process.env.NEXT_PUBLIC_API_URL}/api/finance/analyse`;
 
-    if (activeEndpoint === "analyse") {
+    if (!isChat) {
       setStreamText("");
       setNodes([]);
       setFinalReport(null);
       setIsGraphExpanded(true); // Keep expanded when starting analysis
+    }
+    const assistantMsgId = (Date.now() + 1).toString();
+
+    if (isChat) {
+      const userMsgId = Date.now().toString();
+
+      // 1. Optimistically append User Message + empty Assistant Message placeholder
+      setChatMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "chat_user", content: textToSend.trim() },
+        { id: assistantMsgId, role: "chat_agent", content: "" },
+      ]);
     }
 
     try {
@@ -310,8 +325,7 @@ export default function AnalyseDashboard() {
         },
         body: JSON.stringify({
           prompt: textToSend.trim(),
-          user_id: threadId,
-          ...(activeEndpoint === "chat" && { context: finalReport }),
+          thread_id: threadId,
         }),
       });
 
@@ -321,24 +335,74 @@ export default function AnalyseDashboard() {
       }
 
       const reader = response.body.getReader();
-      const output = await processStreamReader(reader);
+
+      if (isChat) {
+        // 2. Stream tokens directly into the chatMessages state
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || ""; // Keep incomplete line chunk in buffer
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const rawData = line.replace("data: ", "").trim();
+              if (rawData === "[DONE]") break;
+
+              try {
+                const parsed = JSON.parse(rawData);
+                if (parsed.type === "token" && parsed.content) {
+                  // Append token chunk to the target assistant message
+                  setChatMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMsgId
+                        ? { ...msg, content: msg.content + parsed.content }
+                        : msg,
+                    ),
+                  );
+                }
+              } catch (e) {
+                console.error("Error parsing JSON chunk:", e);
+              }
+            }
+          }
+        }
+      } else {
+        await processStreamReader(reader);
+      }
     } catch (error) {
       console.log("Request failed:", error);
-      if (activeEndpoint === "analyse") {
+      if (!isChat) {
         setNodes((prev) =>
           prev.map((n) =>
             n.status === "running" ? { ...n, status: "error" as const } : n,
           ),
         );
+      } else {
+        // Mark assistant message with error notice if request failed
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMsgId
+              ? {
+                  ...msg,
+                  content:
+                    "Sorry, I encountered an error processing your request.",
+                }
+              : msg,
+          ),
+        );
       }
-      setActiveEndpoint("analyse");
     } finally {
       if (!hitlChoices) {
         setIsAnalyzing(false);
       }
     }
   };
-
   /**
    * HITL Choice Resume Handler
    */
@@ -398,7 +462,13 @@ export default function AnalyseDashboard() {
   };
 
   const saveChatConversation = () => {
-    alert("Conversation saved");
+    setHasStarted(false);
+    setNodes([]);
+    setThreadId("");
+    setShowChatFloater(false);
+    setFinalReport(null);
+    setActiveEndpoint("analyse");
+    setIsGraphExpanded(false);
   };
 
   const handlePromptClick = (text: string) => {
@@ -434,13 +504,6 @@ export default function AnalyseDashboard() {
             <button
               onClick={() => {
                 saveChatConversation();
-                setHasStarted(false);
-                setNodes([]);
-                setThreadId("");
-                setShowChatFloater(false);
-                setFinalReport(null);
-                setActiveEndpoint("analyse");
-                setIsGraphExpanded(true);
               }}
               className="w-full bg-emerald-50 dark:bg-[#102019] hover:bg-emerald-100 dark:hover:bg-[#142B21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 rounded-xl py-3 px-4 text-xs font-semibold flex items-center justify-center gap-2 transition mb-4 shadow-sm shrink-0"
             >
@@ -450,7 +513,18 @@ export default function AnalyseDashboard() {
 
             {/* Scrollable User Threads Container */}
             <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-1">
-              <UserThreads />
+              <UserThreads
+                setChatMessages={setChatMessages}
+                setActiveEndpoint={setActiveEndpoint}
+                setHasStarted={setHasStarted}
+                threadId={threadId}
+                setThreadId={setThreadId}
+                setFinalReport={setFinalReport}
+                setIsReportExpanded={setIsReportExpanded}
+                setNodes={setNodes}
+                setHitlChoices={setHitlChoices}
+                setIsGraphExpanded={setIsGraphExpanded}
+              />
             </div>
           </div>
 
@@ -605,6 +679,14 @@ export default function AnalyseDashboard() {
             ) : (
               <div className="space-y-6">
                 {/* 1. AGENT GRAPH */}
+                {nodes.length === 0 && (
+                  <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-sm rounded-xl">
+                    <LoadingSpinner
+                      isLoading={nodes.length === 0}
+                      message="Fetching Conversation..."
+                    />
+                  </div>
+                )}
                 {nodes.length > 0 && (
                   <div className="border border-slate-200 dark:border-slate-800/80 rounded-xl bg-white dark:bg-[#0E1523]/60 overflow-hidden transition-all duration-300 shadow-sm">
                     <button
@@ -646,28 +728,64 @@ export default function AnalyseDashboard() {
                   <div className="border border-emerald-500/30 rounded-xl bg-white dark:bg-[#09111E] overflow-hidden shadow-lg shadow-emerald-500/5 transition-all duration-300">
                     <button
                       onClick={() => setIsReportExpanded(!isReportExpanded)}
-                      className="w-full flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-xs font-semibold text-emerald-800 dark:text-emerald-300 border-b border-emerald-500/20 transition-colors"
+                      className="w-full flex items-center justify-between p-4 bg-emerald-50/80 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-xs font-semibold text-emerald-900 dark:text-emerald-300 border-b border-emerald-500/20 transition-colors cursor-pointer"
                     >
                       <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                        <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                         <span className="text-sm font-bold tracking-wide">
                           Final Analysis Report
                         </span>
                       </div>
                       {isReportExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                        <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       ) : (
-                        <ChevronRight className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                        <ChevronRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       )}
                     </button>
 
                     {isReportExpanded && (
-                      <div className="p-4">
+                      <div className="p-4 bg-white dark:bg-[#09111E]">
                         <FinalReportCard data={finalReport} />
                       </div>
                     )}
                   </div>
                 )}
+
+                {chatMessages.map((msg) => {
+                  const isUser = msg.role === "chat_user";
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm transition-colors ${
+                          isUser
+                            ? "bg-emerald-600 text-white dark:bg-slate-900 dark:text-slate-100 dark:border dark:border-emerald-500/30 rounded-br-none"
+                            : "bg-slate-100 text-slate-900 border border-slate-200 dark:bg-slate-800/80 dark:text-slate-100 dark:border-slate-700/60 rounded-bl-none"
+                        }`}
+                      >
+                        {/* Label Header */}
+                        <div className="text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70">
+                          {isUser ? "You" : "Agent"}
+                        </div>
+
+                        {/* Message Body */}
+                        <p className="whitespace-pre-wrap leading-relaxed">
+                          {msg.content}
+                          {/* Typewriter Cursor Indicator while streaming */}
+                          {!isUser &&
+                            isAnalyzing &&
+                            msg.id ===
+                              chatMessages[chatMessages.length - 1]?.id && (
+                              <span className="inline-block w-2 h-4 ml-1 bg-emerald-400 animate-pulse align-middle" />
+                            )}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

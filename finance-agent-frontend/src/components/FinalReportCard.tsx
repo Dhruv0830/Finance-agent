@@ -6,6 +6,11 @@ import {
   ShieldCheck,
   TrendingUp,
   Sparkles,
+  BarChart3,
+  Scale,
+  BrainCircuit,
+  AlertTriangle,
+  Flame,
 } from "lucide-react";
 
 // Custom X (Twitter) Icon
@@ -23,16 +28,22 @@ const RedditIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
 );
 
 export interface Citation {
-  category: "Social Media" | "Institutional/News";
+  category?: "Social Media" | "Institutional/News";
   source_name:
     | "Reddit"
     | "X (Twitter)"
     | "Web Result"
     | "MoneyControl"
-    | "NSE India";
+    | "NSE India"
+    | string;
   title: string;
   url: string;
   content?: string;
+}
+
+export interface FinancialMetric {
+  label: string;
+  value: number;
 }
 
 export interface FinalReportData {
@@ -40,11 +51,22 @@ export interface FinalReportData {
   action?: "BUY" | "SELL" | "HOLD";
   confidence_score?: number;
   risk_level?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  dissonance_score?: number;
+  quant_weight?: number;
+  social_weight?: number;
+  weights_applied?: {
+    quant_weight?: number;
+    social_weight?: number;
+    [key: string]: any;
+  };
   reasoning_summary?: string;
+  orchestrator_summary?: string;
   key_catalysts?: string;
-  social_momentum?: string[];
+  quantitative_valuation_analysis?: string;
+  social_momentum?: string[] | string;
+  social_momentum_analysis?: string;
   invalidation_rules?: string[];
-  weights_applied?: {};
+  financial_data?: FinancialMetric[];
   source_citations?: Citation[];
 }
 
@@ -53,36 +75,75 @@ interface FinalReportCardProps {
 }
 
 export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
-  // console.log("This is the data", data);
-
   const getSourceIcon = (type: string) => {
     switch (type) {
       case "X (Twitter)":
-        return <XIcon className="w-3.5 h-3.5 text-slate-200" />;
+        return (
+          <XIcon className="w-3.5 h-3.5 text-slate-800 dark:text-slate-200" />
+        );
       case "Reddit":
         return <RedditIcon className="w-3.5 h-3.5 text-orange-500" />;
       case "MoneyControl":
       case "NSE India":
-        return <Newspaper className="w-3.5 h-3.5 text-emerald-400" />;
+        return (
+          <Newspaper className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+        );
       default:
-        return <Globe className="w-3.5 h-3.5 text-sky-400" />;
+        return <Globe className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />;
     }
   };
 
   const getVerdictStyle = (verdict?: string) => {
     switch (verdict?.toUpperCase()) {
       case "BUY":
-        return "border-emerald-500/50 bg-emerald-500/10 text-emerald-400";
+        return "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
       case "SELL":
-        return "border-rose-500/50 bg-rose-500/10 text-rose-400";
+        return "border-rose-500/50 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400";
       default:
-        return "border-amber-500/50 bg-amber-500/10 text-amber-400";
+        return "border-amber-500/50 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400";
     }
   };
 
+  const getRiskStyle = (risk?: string) => {
+    switch (risk?.toUpperCase()) {
+      case "LOW":
+        return "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800";
+      case "MEDIUM":
+        return "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800";
+      case "HIGH":
+      case "CRITICAL":
+        return "bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-800";
+      default:
+        return "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700";
+    }
+  };
+
+  // Helper to resolve weights (from direct props or weights_applied object)
+  const rawQuant =
+    data.quant_weight ?? data.weights_applied?.quant_weight ?? 0.5;
+  const rawSocial =
+    data.social_weight ?? data.weights_applied?.social_weight ?? 0.5;
+  const quantPct = rawQuant <= 1 ? Math.round(rawQuant * 100) : rawQuant;
+  const socialPct = rawSocial <= 1 ? Math.round(rawSocial * 100) : rawSocial;
+
+  // Maximum value for scaling the financial metric bar chart
+  const maxFinVal = data.financial_data
+    ? Math.max(...data.financial_data.map((d) => Math.abs(d.value)), 1)
+    : 1;
+
+  // Resolve combined text summaries
+  const execSummary = data.orchestrator_summary || data.reasoning_summary;
+  const quantAnalysis =
+    data.quantitative_valuation_analysis || data.key_catalysts;
+  const socialAnalysis =
+    data.social_momentum_analysis ||
+    (Array.isArray(data.social_momentum)
+      ? data.social_momentum.join(" • ")
+      : data.social_momentum);
+
   return (
     <div className="w-full max-w-3xl mx-auto my-6 bg-white dark:bg-[#0E1523] border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-6 shadow-lg shadow-emerald-500/5 dark:shadow-[0_0_30px_rgba(16,185,129,0.12)] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 transition-colors">
-      {/* Header Verdict Section */}
+      {/* Header Verdict & Risk Section */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 rounded-xl text-emerald-600 dark:text-emerald-400">
@@ -101,55 +162,192 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
           </div>
         </div>
 
-        {data.action && (
-          <div
-            className={`px-4 py-2 rounded-xl border text-sm font-extrabold tracking-wider ${getVerdictStyle(
-              data.action,
-            )}`}
-          >
-            {data.action}{" "}
-            {data.confidence_score ? `(${data.confidence_score}%)` : ""}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {data.risk_level && (
+            <span
+              className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-bold tracking-wider ${getRiskStyle(
+                data.risk_level,
+              )}`}
+            >
+              RISK: {data.risk_level}
+            </span>
+          )}
+
+          {data.action && (
+            <div
+              className={`px-4 py-2 rounded-xl border text-sm font-extrabold tracking-wider ${getVerdictStyle(
+                data.action,
+              )}`}
+            >
+              {data.action}{" "}
+              {data.confidence_score ? `(${data.confidence_score}%)` : ""}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Summary Section */}
-      {data.reasoning_summary && (
+      {/* Intelligence Weights & Dissonance Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl">
+        {/* Dissonance Score */}
+        <div className="flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+            <span className="flex items-center gap-1.5">
+              <Scale className="w-3.5 h-3.5 text-amber-500" /> Dissonance
+            </span>
+            <span className="font-mono text-slate-900 dark:text-slate-200">
+              {data.dissonance_score ?? 0}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 ${
+                (data.dissonance_score ?? 0) > 50
+                  ? "bg-rose-500"
+                  : "bg-emerald-500"
+              }`}
+              style={{ width: `${Math.min(data.dissonance_score ?? 0, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Quant Weight */}
+        <div className="flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+            <span className="flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-500" /> Quant
+              Weight
+            </span>
+            <span className="font-mono text-slate-900 dark:text-slate-200">
+              {quantPct}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${quantPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Social Weight */}
+        <div className="flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+            <span className="flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5 text-sky-500" /> Social Weight
+            </span>
+            <span className="font-mono text-slate-900 dark:text-slate-200">
+              {socialPct}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-sky-500 transition-all duration-500"
+              style={{ width: `${socialPct}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Executive / Orchestrator Summary */}
+      {execSummary && (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />{" "}
-            Executive Summary
+            {data.orchestrator_summary ? (
+              <BrainCircuit className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            )}
+            Executive Summary & Orchestration
           </h4>
           <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-[#0A0F1D] p-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80">
-            {data.reasoning_summary}
+            {execSummary}
           </p>
         </div>
       )}
 
       {/* Analysis Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {data.key_catalysts && (
+        {quantAnalysis && (
           <div className="p-3.5 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
             <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5" /> Quantitative Valuation
             </span>
             <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-              {data.key_catalysts}
+              {quantAnalysis}
             </p>
           </div>
         )}
 
-        {data.social_momentum && (
+        {socialAnalysis && (
           <div className="p-3.5 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
             <span className="text-[11px] font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5" /> Social Sentiment & Buzz
             </span>
-            <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-              {data.social_momentum}
-            </p>
+            {Array.isArray(data.social_momentum) ? (
+              <ul className="text-xs text-slate-700 dark:text-slate-300 space-y-1 list-disc list-inside">
+                {data.social_momentum.map((item, idx) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                {socialAnalysis}
+              </p>
+            )}
           </div>
         )}
       </div>
+
+      {/* Invalidation Rules */}
+      {data.invalidation_rules && data.invalidation_rules.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" /> Thesis
+            Invalidation Rules
+          </h4>
+          <div className="p-3.5 bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl">
+            <ul className="text-xs text-rose-900 dark:text-rose-300 space-y-1.5 list-disc list-inside">
+              {data.invalidation_rules.map((rule, idx) => (
+                <li key={idx}>{rule}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Metrics Visual Graph */}
+      {data.financial_data && data.financial_data.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <BarChart3 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />{" "}
+            Financial Metrics Overview
+          </h4>
+          <div className="p-4 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+            {data.financial_data.map((item, idx) => {
+              const barWidthPct = Math.min(
+                Math.round((Math.abs(item.value) / maxFinVal) * 100),
+                100,
+              );
+              return (
+                <div key={idx} className="space-y-1">
+                  <div className="flex justify-between text-xs font-medium text-slate-700 dark:text-slate-300">
+                    <span>{item.label}</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                      {item.value.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full transition-all duration-500"
+                      style={{ width: `${barWidthPct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Citations & Sources */}
       {data.source_citations && data.source_citations.length > 0 && (

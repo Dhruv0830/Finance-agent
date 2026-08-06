@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+import uuid
+import re
 from fastapi import FastAPI, HTTPException, APIRouter, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -83,7 +85,7 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     input_data = {
-        "messages": [("user", request.prompt)]
+        "chat_messages": [("user", request.prompt)]
     }
 
     config = get_graph_config(thread_id= request.thread_id)
@@ -186,28 +188,50 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
     try:
         messages = await get_user_conversation(thread_id=thread_id)
         agent_graph = []
-        final_report = {}
-
+        final_report = None
+        chat = []
+        
         for item in messages:
-            if item["role"] != "assistant":
+            if item["role"] == "user" :
                 continue
-
+            
+            elif item["role"] == "chat_user":
+                id = str(uuid.uuid4())
+                content = item.get("content")
+                chat.append({
+                    "id" : id,
+                    "role" : "chat_user",
+                    "content" : content
+                })
+                continue
+                
+            elif item["role"] == "chat_agent":
+                id = str(uuid.uuid4())
+                content = item.get("content")
+                chat.append({
+                    "id" : id,
+                    "role" : "chat_agent",
+                    "content" : content
+                })
+                continue
             # Extract final_report safely from dict
-            if item["node_name"] == "action_payload":
+            elif item["node_name"] == "action_payload":
                 content = item.get("content") or {}
                 state = content.get("state") or {}
                 final_report = state.get("final_action_payload", {})
                 sources = final_report.get("source_citations", [])
                 parsed_citations = []
-                for c in sources:
-                    if isinstance(c, str) and c.strip():  # Ensure string is not empty or whitespace
-                        try:
-                            parsed_citations.append(json.loads(c))
-                        except json.JSONDecodeError:
-                            parsed_citations.append(c)   # Fallback: keep raw string if it's not valid JSON
-                    elif c:
-                        parsed_citations.append(c)
-
+                KEYS = ["category", "source_name", "title", "url", "content"]
+                for raw_string in sources:
+                    data = {}
+                    for key in KEYS:
+                        # Matches key='value' or key="value"
+                        pattern = rf"{key}=(['\"])(.*?)\1(?=\s+\w+=|$)"
+                        match = re.search(pattern, raw_string)
+                        if match:
+                            data[key] = match.group(2)
+                    parsed_citations.append(data)
+                    
                 final_report = {
                     **final_report,
                     "source_citations": parsed_citations
@@ -224,8 +248,9 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
         return {
             "agent_graph" : agent_graph,
             "final_report": final_report,
-            "chat": []
+            "chat": chat
             }
+        
     
     except Exception as err:
         raise HTTPException(

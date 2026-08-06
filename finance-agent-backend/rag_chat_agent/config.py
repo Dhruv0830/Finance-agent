@@ -6,6 +6,7 @@ def get_graph_config(thread_id: str) -> dict:
     Generates a unique LangGraph configuration dictionary for a given user session.
     """
     return {
+        "recursion_limit": 10,
         "configurable": {
             # Standard composite key pattern: combines user and session
             "thread_id": thread_id

@@ -267,10 +267,12 @@ export function UserThreads({
 
   const getConversationThread = async (threadId: string) => {
     setNodes([]);
+    setChatMessages([]);
     setHasStarted(true);
     setFinalReport(null);
     setThreadId("");
     setActiveEndpoint("analyse");
+
     try {
       const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
       const response = await fetch(
@@ -301,15 +303,15 @@ export function UserThreads({
           content: msg.content,
         })),
       );
+      setActiveEndpoint(data?.final_report ? "chat" : "analyse");
+      setIsGraphExpanded(data?.agent_graph?.length > 1);
+      setIsReportExpanded(data?.final_report);
     } catch (err: any) {
       console.error("Error fetching conversation:", err);
       setHasStarted(false);
       setError(err.message);
     } finally {
       setThreadId(threadId);
-      setActiveEndpoint("chat");
-      setIsGraphExpanded(true);
-      setIsReportExpanded(true);
     }
   };
 

@@ -286,12 +286,22 @@ async def get_user_conversation(thread_id: str) -> list[dict]:
             await cur.execute(
                 """
                 SELECT 
-                    role, node_name, content
+                    role, 
+                    node_name, 
+                    content
                 FROM thread_messages
-                WHERE thread_id = %s
-                AND content->'state' IS NOT NULL         
-                AND content->'state' != '{}'::jsonb 
-                AND content->'state' != 'null'::jsonb     
+                WHERE thread_id = %s 
+                AND role != 'user'
+                AND (
+                    role = 'chat_agent'
+                    OR 
+                    role = 'chat_user'
+                    OR (
+                        content->'state' IS NOT NULL 
+                        AND content->'state' != '{}'::jsonb 
+                        AND content->'state' != 'null'::jsonb
+                    )
+                )
                 ORDER BY created_at ASC;
                 """,
                 (thread_id,)

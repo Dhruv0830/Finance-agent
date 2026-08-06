@@ -1,5 +1,6 @@
 "use client";
-
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useState, useEffect } from "react";
 import { createClient } from "@/src/lib/supabase";
 import { useRouter } from "next/navigation";
@@ -305,7 +306,7 @@ export default function AnalyseDashboard() {
     const assistantMsgId = (Date.now() + 1).toString();
 
     if (isChat) {
-      const userMsgId = Date.now().toString();
+      const userMsgId = crypto.randomUUID();
 
       // 1. Optimistically append User Message + empty Assistant Message placeholder
       setChatMessages((prev) => [
@@ -772,16 +773,26 @@ export default function AnalyseDashboard() {
                         </div>
 
                         {/* Message Body */}
-                        <p className="whitespace-pre-wrap leading-relaxed">
-                          {msg.content}
-                          {/* Typewriter Cursor Indicator while streaming */}
-                          {!isUser &&
-                            isAnalyzing &&
-                            msg.id ===
-                              chatMessages[chatMessages.length - 1]?.id && (
-                              <span className="inline-block w-2 h-4 ml-1 bg-emerald-400 animate-pulse align-middle" />
-                            )}
-                        </p>
+                        {isUser ? (
+                          /* User Message: Plain text layout */
+                          <p className="whitespace-pre-wrap leading-relaxed">
+                            {msg.content}
+                          </p>
+                        ) : (
+                          /* Agent Message: Styled Markdown layout */
+                          <div className="prose dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-1 prose-headings:my-2 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+
+                            {/* Typewriter Cursor Indicator while streaming */}
+                            {isAnalyzing &&
+                              msg.id ===
+                                chatMessages[chatMessages.length - 1]?.id && (
+                                <span className="inline-block w-2 h-4 ml-1 bg-emerald-400 animate-pulse align-middle" />
+                              )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

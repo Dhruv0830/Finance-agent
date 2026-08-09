@@ -437,14 +437,21 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
 
     formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(fundamental_data_markdown=final_md)
 
-    analysis_result = None
+    
     try:
         analysis_result = structured_llm.invoke(formatted_prompt)
+        status_msg = "Quantitative analysis completed successfully."
     except Exception as e:
-        print(f"Error in Quantitative Valuation Analyst LLM: {e}")
+        print(f"[Error] Quantitative Valuation Analyst LLM failed: {e}")
+        analysis_result = QuantitativeValuationAnalysis(
+            momentum_score=0.0,
+            sentiment_label="Error",
+            executive_summary="LLM processing failed to parse fundamental data."
+        )
+        status_msg = "Quantitative analysis failed due to an execution error."
 
     return {
-        "messages": [AIMessage(content="Quantitative analysis data ready to be displayed.")],
+        "messages": [AIMessage(content=status_msg)],
         "quantitative_valuation_analysis": analysis_result
     }
 
@@ -465,15 +472,19 @@ def orchestrator(state: AgentState) -> dict:
 
     structured_llm = model_with_tools.with_structured_output(OrchestratorOutput)
 
-    response = None
     try:
         response = structured_llm.invoke(formatted_prompt)
     except Exception as e:
         print(f"Error in Orchestrator LLM: {e}")
+        response = {
+            "messages": [AIMessage(content="LLM processing failed in orchestrator")],
+            "dissonance_score": 0,
+            "orchestrator_summary": "There was an error in the orchestrator LLM."
+        }
 
     return {
-        "orchestrator_summary": response.executive_summary if response else "No data available",
-        "dissonance_score": response.dissonance_score if response else 0
+        "orchestrator_summary": response.executive_summary ,
+        "dissonance_score": response.dissonance_score
     }
 
 
@@ -521,49 +532,46 @@ def action_payload(state: AgentState) -> dict:
 
     structured_llm = model_with_tools.with_structured_output(InvestmentActionPayload)
 
-    response = None
     try:
         response = structured_llm.invoke(formatted_prompt)
     except Exception as e:
+        response = {
+                    "ticker": ticker,
+                    "action": "HOLD",
+                    "confidence_score": 0.5,
+                    "risk_level": "LOW",
+                    "reasoning_summary": "No data available for analysis.",
+                    "key_catalysts": [],
+                    "invalidation_rules": [],
+                    "weights_applied": {"quantitative": quant_weight, "social": social_weight},
+                    "source_citations": []
+                } 
         print(f"Error in Action Payload LLM: {e}")
 
-    if not response:
-        payload_dict = {
-            "ticker": ticker,
-            "action": "HOLD",
-            "confidence_score": 0.5,
-            "risk_level": "LOW",
-            "reasoning_summary": "No data available for analysis.",
-            "key_catalysts": [],
-            "invalidation_rules": [],
-            "weights_applied": {"quantitative": quant_weight, "social": social_weight},
-            "source_citations": []
-        }
-    else:
-        payload_dict = response.model_dump()
-        payload_dict["weights_applied"] = {"quantitative": quant_weight, "social": social_weight}
-        payload_dict["source_citations"] = state.source_citations or []  # Fixed list syntax!
+    payload_dict = response.model_dump()
+    payload_dict["weights_applied"] = {"quantitative": quant_weight, "social": social_weight}
+    payload_dict["source_citations"] = state.source_citations or []  # Fixed list syntax!
 
     return {
         "final_action_payload": payload_dict
     }
 
 
-# Node 11: Send Action
-def send_action_json(state: AgentState) -> dict:
-    payload = state.final_action_payload or {}
+# # Node 11: Send Action
+# def send_action_json(state: AgentState) -> dict:
+#     payload = state.final_action_payload or {}
 
-    if not payload:
-        return {
-            "payload_sent": False,
-            "api_response_status": 500,
-            "payload": ""
-        }
+#     if not payload:
+#         return {
+#             "payload_sent": False,
+#             "api_response_status": 500,
+#             "payload": ""
+#         }
 
-    formatted_json = json.dumps(payload, indent=2)
+#     formatted_json = json.dumps(payload, indent=2)
 
-    return {
-        "payload_sent": True,
-        "payload": formatted_json,
-        "api_response_status": 200
-    }
+#     return {
+#         "payload_sent": True,
+#         "payload": formatted_json,
+#         "api_response_status": 200
+#     }

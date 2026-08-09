@@ -75,6 +75,7 @@ export default function AnalyseDashboard() {
 
   // Workspace UI transitions
   const [hasStarted, setHasStarted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [finalReport, setFinalReport] = useState<FinalReportData | null>(null);
   const [isGraphExpanded, setIsGraphExpanded] = useState(true);
@@ -191,7 +192,7 @@ export default function AnalyseDashboard() {
             setThreadId(parsedChoices);
           }
         } catch (e) {
-          console.warn("Could not parse thread id JSON chunk:", e);
+          console.log("Could not parse thread id JSON chunk:", e);
         }
       }
 
@@ -210,7 +211,7 @@ export default function AnalyseDashboard() {
             setHitlChoices(parsedChoices);
           }
         } catch (e) {
-          console.warn("Could not parse choices JSON chunk:", e);
+          console.log("Could not parse choices JSON chunk:", e);
         }
       }
 
@@ -368,7 +369,7 @@ export default function AnalyseDashboard() {
                   );
                 }
               } catch (e) {
-                console.error("Error parsing JSON chunk:", e);
+                console.log("Error parsing JSON chunk:", e);
               }
             }
           }
@@ -464,6 +465,8 @@ export default function AnalyseDashboard() {
 
   const saveChatConversation = () => {
     setHasStarted(false);
+    setIsAnalyzing(false);
+    setChatMessages([]);
     setNodes([]);
     setThreadId("");
     setShowChatFloater(false);
@@ -519,6 +522,7 @@ export default function AnalyseDashboard() {
                 setActiveEndpoint={setActiveEndpoint}
                 setHasStarted={setHasStarted}
                 threadId={threadId}
+                setConversationLoading={setLoading}
                 setThreadId={setThreadId}
                 setFinalReport={setFinalReport}
                 setIsReportExpanded={setIsReportExpanded}
@@ -680,10 +684,10 @@ export default function AnalyseDashboard() {
             ) : (
               <div className="space-y-6">
                 {/* 1. AGENT GRAPH */}
-                {nodes.length === 0 && (
+                {loading && (
                   <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-sm rounded-xl">
                     <LoadingSpinner
-                      isLoading={nodes.length === 0}
+                      isLoading={loading}
                       message="Fetching Conversation..."
                     />
                   </div>

@@ -123,6 +123,7 @@ async def analyse_finance_endpoint(request: AnalyseRequest, user_id: str = Depen
     )
 
 
+
 #FinAgent Resume endpoint
 @app.post("/api/finance/resume")
 async def resume_finance_endpoint(request: ResumeRequest, user_id: str = Depends(get_current_user_id)):
@@ -143,7 +144,7 @@ async def resume_finance_endpoint(request: ResumeRequest, user_id: str = Depends
         thread_id=thread_id,
         user_id=user_id,
         resume_payload=request.user_response,
-        node_name="hitl_node"
+        node_name="ask_human"
     )
     
     if not success:
@@ -190,65 +191,105 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
         agent_graph = []
         final_report = None
         chat = []
+        options = None
         
         for item in messages:
-            if item["role"] == "user" :
-                continue
-            
-            elif item["role"] == "chat_user":
-                id = str(uuid.uuid4())
-                content = item.get("content")
-                chat.append({
-                    "id" : id,
-                    "role" : "chat_user",
-                    "content" : content
-                })
-                continue
+            if item['node_name'] == 'chat':
+                if item["role"] == "chat_user":
+                    id = str(uuid.uuid4())
+                    content = item.get("content")
+                    chat.append({
+                        "id" : id,
+                        "role" : "chat_user",
+                        "content" : content
+                    })
                 
-            elif item["role"] == "chat_agent":
-                id = str(uuid.uuid4())
-                content = item.get("content")
-                chat.append({
-                    "id" : id,
-                    "role" : "chat_agent",
-                    "content" : content
-                })
-                continue
-            # Extract final_report safely from dict
-            elif item["node_name"] == "action_payload":
-                content = item.get("content") or {}
-                state = content.get("state") or {}
-                final_report = state.get("final_action_payload", {})
-                sources = final_report.get("source_citations", [])
-                parsed_citations = []
-                KEYS = ["category", "source_name", "title", "url", "content"]
-                for raw_string in sources:
-                    data = {}
-                    for key in KEYS:
-                        # Matches key='value' or key="value"
-                        pattern = rf"{key}=(['\"])(.*?)\1(?=\s+\w+=|$)"
-                        match = re.search(pattern, raw_string)
-                        if match:
-                            data[key] = match.group(2)
-                    parsed_citations.append(data)
-                    
-                final_report = {
-                    **final_report,
-                    "source_citations": parsed_citations
-                }
+                else:
+                    id = str(uuid.uuid4())
+                    content = item.get("content")
+                    chat.append({
+                        "id" : id,
+                        "role" : "chat_agent",
+                        "content" : content
+                    })
+            else:
+                if item["role"] == "user" :
+                    continue
+                
+                # Extract final_report safely from dict
+                elif item["node_name"] == "action_payload":
+                    content = item.get("content") or {}
+                    state = content.get("state") or {}
+                    final_report = state.get("final_action_payload", {})
+                    sources = final_report.get("source_citations", [])
+                    parsed_citations = []
+                    KEYS = ["category", "source_name", "title", "url", "content"]
+                    for raw_string in sources:
+                        data = {}
+                        for key in KEYS:
+                            # Matches key='value' or key="value"
+                            pattern = rf"{key}=(['\"])(.*?)\1(?=\s+\w+=|$)"
+                            match = re.search(pattern, raw_string)
+                            if match:
+                                data[key] = match.group(2)
+                        parsed_citations.append(data)
+                        
+                    final_report = {
+                        **final_report,
+                        "source_citations": parsed_citations
+                    }
 
-            # Build agent_graph
-            agent_graph.append({
-                "node_name": item["node_name"],
-                "label": GRAPH_NODES.get(item["node_name"], item["node_name"]),
-                "status": "completed",
-                "nodeStreamText": json.dumps(item["content"], default=str) if item["node_name"] != "action_payload" else "",
-            })
-        
+                # Build agent_graph
+                agent_graph.append({
+                    "name": item["node_name"],
+                    "label": GRAPH_NODES.get(item["node_name"], item["node_name"]),
+                    "status": "completed",
+                    "nodeStreamText": json.dumps(item["content"]) if item["node_name"] != "action_payload" else "",
+                })
+                
+                if item["node_name"] == "stock_search":
+                    options = item["content"]["state"]["search_options"]
+                    agent_graph.append({
+                                        "name": "ask_human",
+                                        "label": GRAPH_NODES.get("ask_human"),
+                                        "status": "running",
+                                        "nodeStreamText": "Please select a stock from the given options: ",
+                                    })     
+                
+        if agent_graph:
+            last_node = agent_graph[-1].get("name")
+
+            if last_node == "action_payload":
+                # 1. Collect all indices where node_name is 'ask_human'
+                ask_human_indices = [
+                    i for i, item in enumerate(agent_graph) 
+                    if item.get("name") == "ask_human"
+                ]
+                
+                # 2. If there are multiple ask_human nodes, keep only the last one
+                if len(ask_human_indices) > 1:
+                    indices_to_remove = set(ask_human_indices[:-1])
+                    agent_graph = [
+                        item for i, item in enumerate(agent_graph) 
+                        if i not in indices_to_remove
+                    ]
+
+            else:
+                # If run was interrupted, slice up to the FIRST ask_human node
+                last_ask_human_idx = -1
+                for i in range(len(agent_graph)):
+                    if agent_graph[i].get("name") == "ask_human":
+                        fist_ask_human_idx = i
+                        break
+                        
+                if fist_ask_human_idx != -1:
+                    agent_graph = agent_graph[: fist_ask_human_idx + 1]
+            
         return {
             "agent_graph" : agent_graph,
             "final_report": final_report,
-            "chat": chat
+            "chat": chat,
+            "options": options
             }
         
     

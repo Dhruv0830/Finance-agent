@@ -141,7 +141,7 @@ async def update_thread_and_log_resume_input(
     thread_id: str,
     user_id: str,
     resume_payload: Union[Dict[str, Any], Any],
-    node_name: str = "hitl_node"
+    node_name: str = "ask_human"
 ) -> bool:
     # Safely extract ticker and serialize content regardless of dict or Pydantic model
     if isinstance(resume_payload, dict):
@@ -169,6 +169,20 @@ async def update_thread_and_log_resume_input(
             row = await result.fetchone()
             if not row:
                 return False  # Thread not found or unauthorized
+            
+            await conn.execute(
+                """
+                UPDATE public.thread_messages
+                SET node_name = 'error'
+                WHERE thread_id = %s
+                AND created_at >= (
+                    SELECT MAX(created_at)
+                    FROM public.thread_messages
+                    WHERE thread_id = %s AND node_name = %s
+                );
+                """,
+                (thread_id, thread_id, node_name)
+            )
 
             # 2. Log Human Feedback/Approval Message
             await conn.execute(
@@ -292,10 +306,13 @@ async def get_user_conversation(thread_id: str) -> list[dict]:
                 FROM thread_messages
                 WHERE thread_id = %s 
                 AND role != 'user'
+                AND node_name != 'error'
                 AND (
                     role = 'chat_agent'
                     OR 
                     role = 'chat_user'
+                    OR 
+                    node_name = 'ask_human'
                     OR (
                         content->'state' IS NOT NULL 
                         AND content->'state' != '{}'::jsonb 

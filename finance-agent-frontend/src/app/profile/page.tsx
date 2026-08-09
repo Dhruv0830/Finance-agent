@@ -151,6 +151,7 @@ export function UserThreads({
   threadId,
   setThreadId,
   setFinalReport,
+  setConversationLoading,
   setIsReportExpanded,
   setNodes,
   setIsGraphExpanded,
@@ -160,6 +161,7 @@ export function UserThreads({
   setActiveEndpoint: Dispatch<SetStateAction<"analyse" | "chat">>;
   setHasStarted: Dispatch<SetStateAction<boolean>>;
   threadId: string;
+  setConversationLoading: Dispatch<SetStateAction<boolean>>;
   setThreadId: Dispatch<SetStateAction<string>>;
   setFinalReport: Dispatch<SetStateAction<FinalReportData | null>>;
   setIsReportExpanded: Dispatch<SetStateAction<boolean>>;
@@ -186,20 +188,6 @@ export function UserThreads({
   async function getThreads() {
     try {
       setLoading(true);
-      // const response = await fetch(
-      //   `${process.env.NEXT_PUBLIC_API_URL}/threads`,
-      //   {
-      //     method: "GET",
-      //     headers: {
-      //       "Content-Type": "application/json",
-      //     },
-      //   },
-      // );
-
-      // =========================================================
-      // PRODUCTION ROUTE
-      // =========================================================
-
       const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads`,
@@ -227,7 +215,7 @@ export function UserThreads({
       setFilteredAnalyses(thread_with_colours || []);
       setThreads(thread_with_colours || []);
     } catch (err: any) {
-      console.error("Error fetching threads:", err);
+      console.log("Error fetching threads:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -267,8 +255,9 @@ export function UserThreads({
 
   const getConversationThread = async (threadId: string) => {
     setNodes([]);
+    setConversationLoading(true);
     setChatMessages([]);
-    setHasStarted(true);
+    setHitlChoices(null);
     setFinalReport(null);
     setThreadId("");
     setActiveEndpoint("analyse");
@@ -290,11 +279,14 @@ export function UserThreads({
         console.log(
           `Failed to fetch conversation thread: ${response.statusText}`,
         );
-        setHasStarted(false);
         return;
       }
       const data = await response.json();
       setFinalReport(data?.final_report);
+      if (!data?.final_report && data?.options) {
+        const options = data?.options;
+        setHitlChoices(options);
+      }
       setNodes(data?.agent_graph);
       setChatMessages(
         data?.chat.map((msg: ChatMessage) => ({
@@ -304,14 +296,16 @@ export function UserThreads({
         })),
       );
       setActiveEndpoint(data?.final_report ? "chat" : "analyse");
-      setIsGraphExpanded(data?.agent_graph?.length > 1);
+      setHasStarted(data?.agent_graph?.length > 0);
+      setIsGraphExpanded(data?.agent_graph?.length > 0);
       setIsReportExpanded(data?.final_report);
     } catch (err: any) {
-      console.error("Error fetching conversation:", err);
+      console.log("Error fetching conversation:", err);
       setHasStarted(false);
       setError(err.message);
     } finally {
       setThreadId(threadId);
+      setConversationLoading(false);
     }
   };
 

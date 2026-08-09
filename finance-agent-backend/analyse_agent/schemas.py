@@ -53,10 +53,10 @@ class AgentState(BaseModel):
     #Action Payload
     final_action_payload: Optional[Dict[str, Any]] = None
 
-    #Terminal status tracker
-    payload_sent: Optional[bool] = None
-    payload: Optional[str] = None
-    api_response_status: Optional[str] = None
+    # #Terminal status tracker
+    # payload_sent: Optional[bool] = None
+    # payload: Optional[str] = None
+    # api_response_status: Optional[str] = None
 
 
 

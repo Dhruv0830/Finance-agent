@@ -52,7 +52,7 @@ async def run_finance_analysis(input_data: dict, config: dict) -> AsyncGenerator
                     "node": node_name, 
                     "status": "completed",
                     "state": output_data
-                }, default=str) # default=str prevents serialization crashes
+                }, default=lambda o: o.model_dump(mode="json")) # default=str prevents serialization crashes
             }
 
     # 2. Check if execution paused on an active Human-in-the-Loop interrupt
@@ -83,6 +83,16 @@ async def resume_finance_analysis(user_response: dict, config: dict) -> AsyncGen
     """
     
     finance_graph = await get_finance_graph()
+    checkpoint_id = None
+    history = [state async for state in finance_graph.astate_history(config)]
+    
+    for snapshot in history:
+        # Check if the next node scheduled to run was ask_human (i.e. paused there)
+        if snapshot.next and "ask_human" in snapshot.next:
+            checkpoint_id = snapshot.config["configurable"].get("checkpoint_id")
+    
+    if checkpoint_id:
+        config["configurable"]["checkpoint_id"] = checkpoint_id
     
     async for event in finance_graph.astream_events(Command(resume=user_response), config=config, stream_mode="updates", version="v2"):
         kind = event["event"]
@@ -103,7 +113,7 @@ async def resume_finance_analysis(user_response: dict, config: dict) -> AsyncGen
                     "node": node_name, 
                     "status": "completed",
                     "state": output_data
-                }, default=str) # default=str prevents serialization crashes
+                }, default=lambda o: o.model_dump(mode="json")) # default=str prevents serialization crashes
             }
             
     yield {

@@ -34,6 +34,8 @@ async def analyse_stream_generator(user_id: str, thread_id: str, prompt: str) ->
         async for chunk in run_finance_analysis(input_data=initial_input, config=config):
             event_type = chunk["event"]
             data_payload = json.loads(chunk["data"])
+            
+            print("This is the data payload",data_payload)
 
             # Log intermediate node completion steps to thread_messages table
             if event_type == "node_update" and data_payload.get("state"):

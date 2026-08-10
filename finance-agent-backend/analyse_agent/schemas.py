@@ -26,8 +26,8 @@ class AgentState(BaseModel):
 
     # --- HITL State Fields ---
     company_name: Optional[str] = None
-    search_options: Optional[List[AgentInput]] = None  # To hold options like [{"exchange": "NSE", "symbol": "TATAMOTORS"}]
-    user_choice: Optional[AgentInput] = None
+    search_options: Optional[List[Dict[str,Any]]] = None  # To hold options like [{"exchange": "NSE", "symbol": "TATAMOTORS"}]
+    user_choice: Optional[Dict[str,Any]] = None
 
     #fundamental and social data
     fundamental_raw: Optional[dict] = None
@@ -37,7 +37,7 @@ class AgentState(BaseModel):
     standardized_social_dump: Optional[str] = None
 
     #Sources for frontend
-    source_citations: Optional[List[CitationMetadata]] = None
+    source_citations: Optional[List[Dict[str,str]]] = None
 
     #Social Momentum Analysis Model
     social_momentum_analysis: Optional[dict] = None
@@ -62,7 +62,7 @@ class AgentState(BaseModel):
 
 class StructuredCompanyListings(BaseModel):
     company_name: str = Field(description="Extract the primary official name of the corporation")
-    listings: List[AgentInput] = Field(description="Extract the latest official stock listings")
+    listings: List[Dict[str,Any]] = Field(description="Extract the latest official stock listings")
     
     
 class SocialMomentumAnalysis(BaseModel):

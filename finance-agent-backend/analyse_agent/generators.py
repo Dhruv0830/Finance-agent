@@ -35,7 +35,7 @@ async def analyse_stream_generator(user_id: str, thread_id: str, prompt: str) ->
             event_type = chunk["event"]
             data_payload = json.loads(chunk["data"])
             
-            print("This is the data payload",data_payload)
+            # print("This is the data payload",data_payload)
 
             # Log intermediate node completion steps to thread_messages table
             if event_type == "node_update" and data_payload.get("state"):
@@ -73,6 +73,7 @@ async def resume_stream_generator(user_response: dict, thread_id: str) -> AsyncG
     """
     # 1. Build graph config using the thread_id
     config = get_graph_config(thread_id)
+    # print("user_response", user_response, config)
 
     try:
         # 2. Iterate over streamed chunks from the resume runner

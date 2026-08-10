@@ -1,5 +1,6 @@
 import json
 import pandas as pd
+import asyncio
 import yfinance as yf
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import interrupt, Command
@@ -18,7 +19,7 @@ search_chain = prompt | structuring_chain
 
 
 # Node 1: Stock Search
-def stock_search_node(state: AgentState) -> dict:
+async def stock_search_node(state: AgentState) -> dict:
     print("Search Node: Executing Web Search Node")
 
     query = state.messages[-1].content
@@ -26,7 +27,7 @@ def stock_search_node(state: AgentState) -> dict:
 
     structured_response = None
     try:
-        structured_response = search_chain.invoke({"query": query})
+        structured_response = await search_chain.ainvoke({"query": query})
         print("Search Node: Search Results: ", structured_response)
     except Exception as e:
         print(f"Search Node: Error in Search Chain: {e}")
@@ -51,7 +52,7 @@ def ask_human_node(state: AgentState) -> dict:
     print("Ask Human Node: Entering the Human Node")
 
     # Options are Pydantic objects, convert to json strings for human display
-    options = [item.model_dump() for item in state.search_options or [] ] 
+    options =  state.search_options or [] 
     if not options:
         print("Ask Human Node: No search options found to present. Automatically terminating.")
         return {"user_choice": None}
@@ -63,13 +64,13 @@ def ask_human_node(state: AgentState) -> dict:
     }
 
     print("Ask Human Node: Choices: ", interrupt_payload)
-    human_response: AgentInput | dict = interrupt(interrupt_payload)
+    human_response: dict = interrupt(interrupt_payload)
     print("Ask Human Node: Selection received: ", human_response)
 
-    if isinstance(human_response, dict):
-        validated_choice = AgentInput(**human_response)
-    else:
-        validated_choice = human_response
+    # if isinstance(human_response, dict):
+    #     validated_choice = AgentInput(**human_response)
+    # else:
+    validated_choice = human_response
 
     # Save Pydantic object directly back to state!
     return {
@@ -81,10 +82,10 @@ def ask_human_node(state: AgentState) -> dict:
 # Node 3: Router
 def market_router(state: AgentState) -> str:
     # Full dot notation access!
-    market_name = state.user_choice.market if state.user_choice else "NOT_FOUND"
+    market_name = state.user_choice["market"] if state.user_choice else "NOT_FOUND"
     print(f"Market Router: Market : {market_name}")
 
-    if market_name == "NOT_FOUND" or (state.user_choice and state.user_choice.ticker == "NOT_FOUND"):
+    if market_name == "NOT_FOUND" or (state.user_choice and state.user_choice["ticker"] == "NOT_FOUND"):
         return "terminate"
     elif market_name == "INDIA":
         return "india_tools"
@@ -110,15 +111,19 @@ def termination_node(state: AgentState) -> dict:
         ]
     }
 
+def _get_yf_info(symbol: str) -> dict:
+    ticker = yf.Ticker(symbol)
+    return ticker
 
 # Node 4b: Fundamental India Data
-def india_fundamental(state: AgentState) -> dict:
+async def india_fundamental(state: AgentState) -> dict:
     print("India Fundamental Node: ")
     choice = state.user_choice
-    stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
-    lookback_days = choice.lookback_days
+    stock_name = choice["ticker"] if choice["ticker"].endswith('.NS') else f"{choice['ticker']}.NS"
+    lookback_days = choice["lookback_days"]
 
-    ticker_obj = yf.Ticker(stock_name)
+    ticker_obj = await asyncio.to_thread(_get_yf_info, stock_name)
+    
     history_df = ticker_obj.history(period=f"{lookback_days}d")
     # 1. Reset index to turn Date/Datetime into an explicit column
     history_df = history_df.reset_index()
@@ -171,23 +176,23 @@ def india_fundamental(state: AgentState) -> dict:
 
 
 # Node 4c: Social Sentiment India
-def india_X_reddit(state: AgentState) -> dict:
+async def india_X_reddit(state: AgentState) -> dict:
     print("India X/Reddit Node: ")
     choice = state.user_choice
-    stock_name = choice.ticker if choice.ticker.endswith('.NS') else f"{choice.ticker}.NS"
-    lookback_days = choice.lookback_days
+    stock_name = choice["ticker"] if choice["ticker"].endswith('.NS') else f"{choice['ticker']}.NS"
+    lookback_days = choice["lookback_days"]
 
     search = TavilySearch(max_results=15)
     reddit_context = None
     x_context = None
 
     try:
-        reddit_context = search.invoke({
+        reddit_context = await search.ainvoke({
             "query": f"{stock_name} stock for last {lookback_days} days",
             "include_domains": ["reddit.com/r/IndianStockMarket", "reddit.com/r/IndianStreetBets"]
         })
 
-        x_context = search.invoke({
+        x_context = await search.ainvoke({
             "query": f"{stock_name} stock for last {lookback_days} days",
             "include_domains": ["x.com", "moneycontrol.com", "nseindia.com"]
         })
@@ -203,13 +208,13 @@ def india_X_reddit(state: AgentState) -> dict:
 
 
 # Node 4d: US Fundamental Data
-def us_fundamental(state: AgentState) -> dict:
+async def us_fundamental(state: AgentState) -> dict:
     print("US Fundamental Node: ")
     choice = state.user_choice
-    stock_name = choice.ticker
-    lookback_days = choice.lookback_days
+    stock_name = choice["ticker"]
+    lookback_days = choice["lookback_days"]
 
-    ticker_obj = yf.Ticker(stock_name)
+    ticker_obj = await asyncio.to_thread(_get_yf_info, stock_name)
     history_df = ticker_obj.history(period=f"{lookback_days}d")
     
     # 1. Reset index to turn Date/Datetime into an explicit column
@@ -263,23 +268,23 @@ def us_fundamental(state: AgentState) -> dict:
 
 
 # Node 4e: US Social Sentiment
-def us_X_reddit(state: AgentState) -> dict:
+async def us_X_reddit(state: AgentState) -> dict:
     print("US X/Reddit Node: ")
     choice = state.user_choice
-    stock_name = choice.ticker
-    lookback_days = choice.lookback_days
+    stock_name = choice["ticker"]
+    lookback_days = choice["lookback_days"]
 
     search = TavilySearch(max_results=15)
     reddit_context = None
     x_context = None
 
     try:
-        reddit_context = search.invoke({
+        reddit_context = await search.ainvoke({
             "query": f"{stock_name} stock for last {lookback_days} days",
             "include_domains": ["reddit.com/r/wallstreetbets", "reddit.com/r/stocks"]
         })
 
-        x_context = search.invoke({
+        x_context = await search.ainvoke({
             "query": f"{stock_name} stock for last {lookback_days} days",
             "include_domains": ["x.com", "robinhood.com", "cnbc.com"]
         })
@@ -385,15 +390,15 @@ def state_consolidation(state: AgentState) -> dict:
 
 
 # Node 6a: Social Analyst
-def social_momentum_analyst(state: AgentState) -> dict:
+async def social_momentum_analyst(state: AgentState) -> dict:
     if not state.standardized_social_dump:
         return {
             "messages": [AIMessage(content="Insufficient social data for this stock ticker")],
-            "social_momentum_analysis": SocialMomentumAnalysis(
-                momentum_score=0.0,
-                sentiment_label="Neutral (No Data)",
-                executive_summary="No social media or news data was available for analysis."
-            )
+            "social_momentum_analysis":{
+                "momentum_score": 0.0,
+                "sentiment_label":"Neutral (No Data)",
+                "executive_summary":"No social media or news data was available for analysis."
+            }
         }
 
     structured_llm = analysis_model.with_structured_output(SocialMomentumAnalysis).with_retry(
@@ -403,29 +408,36 @@ def social_momentum_analyst(state: AgentState) -> dict:
     formatted_prompt = SOCIAL_MOMENTUM_ANALYST_PROMPT.format(
         consolidated_markdown_data=state.standardized_social_dump
     )
-
-    analysis_result = None
+    
     try:
-        analysis_result = structured_llm.invoke(formatted_prompt)
+        analysis_result = await structured_llm.ainvoke(formatted_prompt)
     except Exception as e:
         print(f"Error in Social Momentum Analyst LLM: {e}")
+        return  {
+                    "messages": [AIMessage(content="Error while gathering social data for this stock ticker")],
+                    "social_momentum_analysis":{
+                        "momentum_score": 0.0,
+                        "sentiment_label":"Neutral (No Data)",
+                        "executive_summary":"No social media or news data was available for analysis."
+                    }
+                }
 
     return {
         "messages": [AIMessage(content="Analysis data ready to be displayed.")],
-        "social_momentum_analysis": analysis_result
+        "social_momentum_analysis": analysis_result.model_dump()
     }
 
 
 # Node 6b: Quant Analyst
-def quantitative_valuation_analyst(state: AgentState) -> dict:
+async def quantitative_valuation_analyst(state: AgentState) -> dict:
     if not state.standardized_fundamentals:
         return {
             "messages": [AIMessage(content="Insufficient fundamental data for this stock ticker")],
-            "quantitative_valuation_analysis": QuantitativeValuationAnalysis(
-                momentum_score=0.0,
-                sentiment_label="Neutral (No Data)",
-                executive_summary="No fundamental data was available for analysis."
-            )
+            "quantitative_valuation_analysis": {
+                "momentum_score":0.0,
+                "sentiment_label":"Neutral (No Data)",
+                "executive_summary":"No fundamental data was available for analysis."
+            }
         }
 
     fundamentals = state.standardized_fundamentals
@@ -437,27 +449,26 @@ def quantitative_valuation_analyst(state: AgentState) -> dict:
 
     formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(fundamental_data_markdown=final_md)
 
-    
     try:
-        analysis_result = structured_llm.invoke(formatted_prompt)
+        analysis_result = await structured_llm.ainvoke(formatted_prompt)
         status_msg = "Quantitative analysis completed successfully."
     except Exception as e:
         print(f"[Error] Quantitative Valuation Analyst LLM failed: {e}")
-        analysis_result = QuantitativeValuationAnalysis(
-            momentum_score=0.0,
-            sentiment_label="Error",
-            executive_summary="LLM processing failed to parse fundamental data."
-        )
+        analysis_result = {
+            "momentum_score":0.0,
+            "sentiment_label":"Error",
+            "executive_summary":"LLM processing failed to parse fundamental data."
+        }
         status_msg = "Quantitative analysis failed due to an execution error."
 
     return {
         "messages": [AIMessage(content=status_msg)],
-        "quantitative_valuation_analysis": analysis_result
+        "quantitative_valuation_analysis": analysis_result.model_dump()
     }
 
 
 # Node 7: Orchestrator
-def orchestrator(state: AgentState) -> dict:
+async def orchestrator(state: AgentState) -> dict:
     if not state.quantitative_valuation_analysis or not state.social_momentum_analysis:
         return {
             "messages": [AIMessage(content="Insufficient data for analysis.")],
@@ -473,7 +484,7 @@ def orchestrator(state: AgentState) -> dict:
     structured_llm = model_with_tools.with_structured_output(OrchestratorOutput)
 
     try:
-        response = structured_llm.invoke(formatted_prompt)
+        response = await structured_llm.ainvoke(formatted_prompt)
     except Exception as e:
         print(f"Error in Orchestrator LLM: {e}")
         response = {
@@ -515,8 +526,8 @@ def adjust_confidence_weights(state: AgentState) -> dict:
 
 
 # Node 10: Action Payload
-def action_payload(state: AgentState) -> dict:
-    ticker = state.user_choice.ticker if state.user_choice else "NOT_FOUND"
+async def action_payload(state: AgentState) -> dict:
+    ticker = state.user_choice["ticker"] if state.user_choice else "NOT_FOUND"
     orchestrator_summary = state.orchestrator_summary or "NOT_FOUND"
     quant_weight = state.quant_weight or 0.5
     social_weight = state.social_weight or 0.5
@@ -533,7 +544,7 @@ def action_payload(state: AgentState) -> dict:
     structured_llm = model_with_tools.with_structured_output(InvestmentActionPayload)
 
     try:
-        response = structured_llm.invoke(formatted_prompt)
+        response = await structured_llm.ainvoke(formatted_prompt)
     except Exception as e:
         response = {
                     "ticker": ticker,

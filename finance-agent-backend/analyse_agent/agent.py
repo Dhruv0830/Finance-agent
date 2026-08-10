@@ -81,18 +81,22 @@ async def resume_finance_analysis(user_response: dict, config: dict) -> AsyncGen
     :param user_response: Value passed back from human input (e.g., {"approve": True})
     :param config: Must contain the EXACT SAME thread_id to resume the paused thread state
     """
-    
+    # print("inside resume finance", user_response)
     finance_graph = await get_finance_graph()
-    checkpoint_id = None
-    history = [state async for state in finance_graph.astate_history(config)]
-    
-    for snapshot in history:
-        # Check if the next node scheduled to run was ask_human (i.e. paused there)
+    target_checkpoint_id = None
+    target_snapshot = None
+
+# Iterate newest -> oldest state
+    async for snapshot in finance_graph.aget_state_history(config):
+        # Check if 'ask_human' is scheduled as the next node
+        # print("snapShot", snapshot)
         if snapshot.next and "ask_human" in snapshot.next:
-            checkpoint_id = snapshot.config["configurable"].get("checkpoint_id")
+            target_checkpoint_id = snapshot.config["configurable"].get("checkpoint_id")
+            target_snapshot = snapshot
+            break
     
-    if checkpoint_id:
-        config["configurable"]["checkpoint_id"] = checkpoint_id
+    if target_checkpoint_id:
+        config["configurable"]["checkpoint_id"] = target_checkpoint_id
     
     async for event in finance_graph.astream_events(Command(resume=user_response), config=config, stream_mode="updates", version="v2"):
         kind = event["event"]

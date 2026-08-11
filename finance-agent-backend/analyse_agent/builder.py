@@ -61,12 +61,12 @@ builder.add_edge("india_fundamental", "state_consolidation")
 builder.add_edge("us_social", "state_consolidation")
 builder.add_edge("us_fundamental", "state_consolidation")
 
-builder.add_edge("state_consolidation",'social_momentum_analyst')
+builder.add_edge("state_consolidation","social_momentum_analyst")
 # builder.add_edge("state_consolidation",'quantitative_valuation_analyst')
-builder.add_edge("social_momentum_analyst",'quantitative_valuation_analyst')
+builder.add_edge("state_consolidation","quantitative_valuation_analyst")
 
-# builder.add_edge("social_momentum_analyst",'orchestrator')
-builder.add_edge("quantitative_valuation_analyst",'orchestrator')
+builder.add_edge("social_momentum_analyst","orchestrator")
+builder.add_edge("quantitative_valuation_analyst","orchestrator")
 
 builder.add_conditional_edges(
     "orchestrator",

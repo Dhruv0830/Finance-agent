@@ -9,9 +9,9 @@ NODE_NAMES = {
   "ask_human", 
 
   "india_fundamental",
-  "india_X_reddit",
+  "india_social",
   "us_fundamental",
-  "us_X_reddit",
+  "us_social",
 
   "state_consolidation",
   "social_momentum_analyst",

@@ -48,9 +48,9 @@ const GRAPH_NODES: Record<string, string> = {
   ask_human: "2. Human Validation",
 
   india_fundamental: "3. Market Analysis",
-  india_X_reddit: "4. Social Buzz",
+  india_social: "4. Social Buzz",
   us_fundamental: "3. Market Analysis",
-  us_X_reddit: "4. Social Buzz",
+  us_social: "4. Social Buzz",
 
   state_consolidation: "5. Aggregating Data",
   social_momentum_analyst: "6. Social Momentum Analyst",

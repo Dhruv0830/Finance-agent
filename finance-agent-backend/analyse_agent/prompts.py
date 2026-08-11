@@ -56,7 +56,8 @@ Your job is to analyze raw social media posts, community discussions, and news f
 QUANTITATIVE_VALUATION_PROMPT = """You are a Principal Quantitative Financial Analyst specializing in equity valuation and fundamental analysis (NSE/BSE and US markets).
 
 Your job is to analyze fundamental financial data (income statement, balance sheet, cash flows, and valuation metrics) and compute/extract precise quantitative valuation features.
-
+###TICKER:
+{ticker}
 ### INPUT DATA:
 {fundamental_data_markdown}
 

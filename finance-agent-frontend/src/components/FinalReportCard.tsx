@@ -6,11 +6,14 @@ import {
   ShieldCheck,
   TrendingUp,
   Sparkles,
-  BarChart3,
   Scale,
   BrainCircuit,
   AlertTriangle,
-  Flame,
+  TrendingDown,
+  CheckCircle2,
+  XCircle,
+  Activity,
+  Layers,
 } from "lucide-react";
 
 // Custom X (Twitter) Icon
@@ -41,32 +44,59 @@ export interface Citation {
   content?: string;
 }
 
-export interface FinancialMetric {
-  label: string;
-  value: number;
-}
-
 export interface FinalReportData {
   ticker?: string;
   action?: "BUY" | "SELL" | "HOLD";
   confidence_score?: number;
   risk_level?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   dissonance_score?: number;
-  quant_weight?: number;
-  social_weight?: number;
   weights_applied?: {
+    quant?: number;
+    social?: number;
     quant_weight?: number;
     social_weight?: number;
     [key: string]: any;
   };
   reasoning_summary?: string;
   orchestrator_summary?: string;
-  key_catalysts?: string;
-  quantitative_valuation_analysis?: string;
-  social_momentum?: string[] | string;
-  social_momentum_analysis?: string;
+  key_catalysts?: string[];
+  quantitative_valuation_analysis?: {
+    ticker?: string;
+    multiples?: {
+      pb_ratio?: number;
+      pe_ratio?: number;
+      ev_ebitda?: number;
+      peg_ratio?: number;
+      debt_to_equity?: number;
+      roe_percentage?: number;
+      [key: string]: any;
+    };
+    intrinsic_model?: {
+      valuation_status?: string;
+      upside_downside_pct?: number | null;
+      current_market_price?: number;
+      has_margin_of_safety?: boolean;
+      estimated_intrinsic_value?: number | null;
+    };
+    key_strengths?: string[];
+    key_concerns?: string[];
+    valuation_summary?: string;
+  };
+  social_momentum_analysis?: {
+    risk_flags?: string[];
+    sample_counts?: {
+      x_count?: number;
+      news_count?: number;
+      reddit_count?: number;
+      [key: string]: any;
+    };
+    momentum_score?: number;
+    sentiment_label?: string;
+    executive_summary?: string;
+    key_bearish_drivers?: string[];
+    key_bullish_drivers?: string[];
+  };
   invalidation_rules?: string[];
-  financial_data?: FinancialMetric[];
   source_citations?: Citation[];
 }
 
@@ -118,28 +148,21 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
     }
   };
 
-  // Helper to resolve weights (from direct props or weights_applied object)
+  // Helper to resolve weights
   const rawQuant =
-    data.quant_weight ?? data.weights_applied?.quant_weight ?? 0.5;
+    data.weights_applied?.quant ?? data.weights_applied?.quant_weight ?? 0.5;
   const rawSocial =
-    data.social_weight ?? data.weights_applied?.social_weight ?? 0.5;
+    data.weights_applied?.social ?? data.weights_applied?.social_weight ?? 0.5;
+  const rawConfidence = data.confidence_score ?? 0.1;
   const quantPct = rawQuant <= 1 ? Math.round(rawQuant * 100) : rawQuant;
   const socialPct = rawSocial <= 1 ? Math.round(rawSocial * 100) : rawSocial;
+  const confidencePct =
+    rawConfidence <= 1 ? Math.round(rawConfidence * 100) : rawConfidence;
 
-  // Maximum value for scaling the financial metric bar chart
-  const maxFinVal = data.financial_data
-    ? Math.max(...data.financial_data.map((d) => Math.abs(d.value)), 1)
-    : 1;
-
-  // Resolve combined text summaries
+  // Summaries
   const execSummary = data.orchestrator_summary || data.reasoning_summary;
-  const quantAnalysis =
-    data.quantitative_valuation_analysis || data.key_catalysts;
-  const socialAnalysis =
-    data.social_momentum_analysis ||
-    (Array.isArray(data.social_momentum)
-      ? data.social_momentum.join(" • ")
-      : data.social_momentum);
+  const quantNode = data.quantitative_valuation_analysis;
+  const socialNode = data.social_momentum_analysis;
 
   return (
     <div className="w-full max-w-3xl mx-auto my-6 bg-white dark:bg-[#0E1523] border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-6 shadow-lg shadow-emerald-500/5 dark:shadow-[0_0_30px_rgba(16,185,129,0.12)] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 transition-colors">
@@ -151,7 +174,9 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
           </div>
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <span>{data.ticker || "ANALYSIS VERDICT"}</span>
+              <span>
+                {data.ticker || quantNode?.ticker || "ANALYSIS VERDICT"}
+              </span>
               <span className="text-xs text-slate-500 font-mono font-normal">
                 Final Intelligence Synthesis
               </span>
@@ -179,8 +204,7 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
                 data.action,
               )}`}
             >
-              {data.action}{" "}
-              {data.confidence_score ? `(${data.confidence_score}%)` : ""}
+              {data.action} {confidencePct ? `(${confidencePct}%)` : ""}
             </div>
           )}
         </div>
@@ -195,17 +219,19 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
               <Scale className="w-3.5 h-3.5 text-amber-500" /> Dissonance
             </span>
             <span className="font-mono text-slate-900 dark:text-slate-200">
-              {data.dissonance_score ?? 0}%
+              {data.dissonance_score ?? 0}/10
             </span>
           </div>
           <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-500 ${
-                (data.dissonance_score ?? 0) > 50
+                (data.dissonance_score ?? 0) > 4
                   ? "bg-rose-500"
                   : "bg-emerald-500"
               }`}
-              style={{ width: `${Math.min(data.dissonance_score ?? 0, 100)}%` }}
+              style={{
+                width: `${Math.min(((data.dissonance_score ?? 0) / 10) * 100, 100)}%`,
+              }}
             />
           </div>
         </div>
@@ -265,35 +291,200 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
         </div>
       )}
 
-      {/* Analysis Grid */}
+      {/* Key Catalysts (Top Highlights) */}
+      {data.key_catalysts && data.key_catalysts.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
+            <Activity className="w-3.5 h-3.5" /> Core Catalysts
+          </h4>
+          <div className="p-3.5 bg-amber-50/40 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/30 rounded-xl">
+            <ul className="text-xs text-slate-800 dark:text-slate-300 space-y-1.5 list-disc list-inside">
+              {data.key_catalysts.map((catalyst, idx) => (
+                <li key={idx}>{catalyst}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* DETAILED NODE ANALYSES GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {quantAnalysis && (
-          <div className="p-3.5 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
-            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5" /> Quantitative Valuation
-            </span>
-            <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-              {quantAnalysis}
-            </p>
+        {/* Quantitative Valuation Node Card */}
+        {quantNode && (
+          <div className="p-4 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5" /> Quantitative Valuation
+              </span>
+              {quantNode.intrinsic_model?.valuation_status && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  {quantNode.intrinsic_model.valuation_status}
+                </span>
+              )}
+            </div>
+
+            {/* Valuation Multiples Grid */}
+            {quantNode.multiples && (
+              <div className="grid grid-cols-3 gap-2 py-1">
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">P/E</span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.pe_ratio ?? "N/A"}
+                  </span>
+                </div>
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">P/B</span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.pb_ratio ?? "N/A"}
+                  </span>
+                </div>
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">PEG</span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.peg_ratio ?? "N/A"}
+                  </span>
+                </div>
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">
+                    EV/EBITDA
+                  </span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.ev_ebitda ?? "N/A"}
+                  </span>
+                </div>
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">ROE</span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.roe_percentage
+                      ? `${quantNode.multiples.roe_percentage}%`
+                      : "N/A"}
+                  </span>
+                </div>
+                <div className="p-1.5 bg-white dark:bg-[#0E1523] border border-slate-200 dark:border-slate-800 rounded-lg text-center">
+                  <span className="text-[10px] text-slate-400 block">D/E</span>
+                  <span className="text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {quantNode.multiples.debt_to_equity ?? "N/A"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Key Strengths & Concerns */}
+            {quantNode.key_concerns && quantNode.key_concerns.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase">
+                  Key Risks
+                </span>
+                <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                  {quantNode.key_concerns.map((concern, i) => (
+                    <li key={i} className="flex items-start gap-1">
+                      <XCircle className="w-3 h-3 text-rose-500 shrink-0 mt-0.5" />
+                      <span>{concern}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {quantNode.key_strengths && quantNode.key_strengths.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                  Strengths
+                </span>
+                <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                  {quantNode.key_strengths.map((strength, i) => (
+                    <li key={i} className="flex items-start gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{strength}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {quantNode.valuation_summary && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-800/60 leading-relaxed">
+                {quantNode.valuation_summary}
+              </p>
+            )}
           </div>
         )}
 
-        {socialAnalysis && (
-          <div className="p-3.5 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
-            <span className="text-[11px] font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5" /> Social Sentiment & Buzz
-            </span>
-            {Array.isArray(data.social_momentum) ? (
-              <ul className="text-xs text-slate-700 dark:text-slate-300 space-y-1 list-disc list-inside">
-                {data.social_momentum.map((item, idx) => (
-                  <li key={idx}>{item}</li>
-                ))}
-              </ul>
-            ) : (
+        {/* Social Momentum Node Card */}
+        {socialNode && (
+          <div className="p-4 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <span className="text-xs font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5" /> Social Momentum
+              </span>
+              <div className="flex items-center gap-1.5">
+                {socialNode.sentiment_label && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
+                    {socialNode.sentiment_label}
+                  </span>
+                )}
+                {socialNode.momentum_score !== undefined && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    Score: {socialNode.momentum_score}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Sample Distribution */}
+            {socialNode.sample_counts && (
+              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-white dark:bg-[#0E1523] p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                <Layers className="w-3 h-3 text-slate-400" />
+                <span>News: {socialNode.sample_counts.news_count ?? 0}</span> |
+                <span>
+                  Reddit: {socialNode.sample_counts.reddit_count ?? 0}
+                </span>{" "}
+                |<span>X: {socialNode.sample_counts.x_count ?? 0}</span>
+              </div>
+            )}
+
+            {/* Executive Summary */}
+            {socialNode.executive_summary && (
               <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                {socialAnalysis}
+                {socialNode.executive_summary}
               </p>
             )}
+
+            {/* Bearish Drivers */}
+            {socialNode.key_bearish_drivers &&
+              socialNode.key_bearish_drivers.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase">
+                    Bearish Drivers
+                  </span>
+                  <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                    {socialNode.key_bearish_drivers.map((driver, i) => (
+                      <li key={i} className="flex items-start gap-1">
+                        <TrendingDown className="w-3 h-3 text-rose-500 shrink-0 mt-0.5" />
+                        <span>{driver}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* Bullish Drivers */}
+            {socialNode.key_bullish_drivers &&
+              socialNode.key_bullish_drivers.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                    Bullish Drivers
+                  </span>
+                  <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                    {socialNode.key_bullish_drivers.map((driver, i) => (
+                      <li key={i} className="flex items-start gap-1">
+                        <TrendingUp className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
+                        <span>{driver}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
           </div>
         )}
       </div>
@@ -311,40 +502,6 @@ export const FinalReportCard: React.FC<FinalReportCardProps> = ({ data }) => {
                 <li key={idx}>{rule}</li>
               ))}
             </ul>
-          </div>
-        </div>
-      )}
-
-      {/* Financial Metrics Visual Graph */}
-      {data.financial_data && data.financial_data.length > 0 && (
-        <div className="space-y-3 pt-2">
-          <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <BarChart3 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />{" "}
-            Financial Metrics Overview
-          </h4>
-          <div className="p-4 bg-slate-50 dark:bg-[#0A0F1D] border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
-            {data.financial_data.map((item, idx) => {
-              const barWidthPct = Math.min(
-                Math.round((Math.abs(item.value) / maxFinVal) * 100),
-                100,
-              );
-              return (
-                <div key={idx} className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium text-slate-700 dark:text-slate-300">
-                    <span>{item.label}</span>
-                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
-                      {item.value.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full transition-all duration-500"
-                      style={{ width: `${barWidthPct}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </div>
       )}

@@ -222,17 +222,17 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
                     state = content.get("state") or {}
                     final_report = state.get("final_action_payload", {})
                     sources = final_report.get("source_citations", [])
-                    parsed_citations = []
-                    KEYS = ["category", "source_name", "title", "url", "content"]
-                    for raw_string in sources:
-                        data = {}
-                        for key in KEYS:
-                            # Matches key='value' or key="value"
-                            pattern = rf"{key}=(['\"])(.*?)\1(?=\s+\w+=|$)"
-                            match = re.search(pattern, raw_string)
-                            if match:
-                                data[key] = match.group(2)
-                        parsed_citations.append(data)
+                    parsed_citations = sources
+                    # KEYS = ["category", "source_name", "title", "url", "content"]
+                    # for raw_string in sources:
+                    #     data = {}
+                    #     for key in KEYS:
+                    #         # Matches key='value' or key="value"
+                    #         pattern = rf"{key}=(['\"])(.*?)\1(?=\s+\w+=|$)"
+                    #         match = re.search(pattern, raw_string)
+                    #         if match:
+                    #             data[key] = match.group(2)
+                    #     parsed_citations.append(data)
                         
                     final_report = {
                         **final_report,
@@ -248,12 +248,13 @@ async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_cu
                 })
                 
                 if item["node_name"] == "stock_search":
+                    # print("Stock node", item)
                     options = item["content"]["state"]["search_options"]
                     agent_graph.append({
                                         "name": "ask_human",
                                         "label": GRAPH_NODES.get("ask_human"),
                                         "status": "running",
-                                        "nodeStreamText": "Please select a stock from the given options: ",
+                                        "nodeStreamText": "Please select a stock from the options given above: ",
                                     })     
                 
         if agent_graph:

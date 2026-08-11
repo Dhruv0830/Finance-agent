@@ -447,7 +447,7 @@ async def quantitative_valuation_analyst(state: AgentState) -> dict:
         stop_after_attempt=2, wait_exponential_jitter=True
     )
 
-    formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(fundamental_data_markdown=final_md)
+    formatted_prompt = QUANTITATIVE_VALUATION_PROMPT.format(ticker=state.user_choice["ticker"],fundamental_data_markdown=final_md)
 
     try:
         analysis_result = await structured_llm.ainvoke(formatted_prompt)
@@ -562,6 +562,10 @@ async def action_payload(state: AgentState) -> dict:
     payload_dict = response.model_dump()
     payload_dict["weights_applied"] = {"quantitative": quant_weight, "social": social_weight}
     payload_dict["source_citations"] = state.source_citations or []  # Fixed list syntax!
+    payload_dict["dissonance_score"] = state.dissonance_score  # Fixed list syntax!
+    payload_dict["orchestrator_summary"] = state.orchestrator_summary  # Fixed list syntax!
+    payload_dict["quantitative_valuation_analysis"] = state.quantitative_valuation_analysis  # Fixed list syntax!
+    payload_dict["social_momentum_analysis"] = state.social_momentum_analysis  # Fixed list syntax!
 
     return {
         "final_action_payload": payload_dict

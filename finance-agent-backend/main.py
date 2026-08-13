@@ -43,7 +43,8 @@ app = FastAPI(title="FinAgent SSE Backend", version="1.0.0", lifespan=lifespan)
 # Enable CORS for Next.js frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Adjust for production
+    allow_origins=["http://localhost:3000","https://*.railway.app",  # Permits production Railway domains
+        "https://*.vercel.app",],  # Adjust for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -176,7 +177,7 @@ async def get_threads_endpoint(user_id: str = Depends(get_current_user_id)):
         )
 
 
-@app.get("/api/finance/threads/{thread_id}/")
+@app.get("/api/finance/threads/{thread_id}")
 async def get_conversation_thread(thread_id: str, user_id : str = Depends(get_current_user_id)):
     "To load the user conversation tied to a thread_id"
     

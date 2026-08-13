@@ -147,6 +147,7 @@ export const getCookie = async (supabase: SupabaseClient): Promise<string> => {
 export function UserThreads({
   setActiveEndpoint,
   setChatMessages,
+  setIsAnalyzing,
   setHasStarted,
   threadId,
   setThreadId,
@@ -161,6 +162,7 @@ export function UserThreads({
   setActiveEndpoint: Dispatch<SetStateAction<"analyse" | "chat">>;
   setHasStarted: Dispatch<SetStateAction<boolean>>;
   threadId: string;
+  setIsAnalyzing: Dispatch<SetStateAction<boolean>>;
   setConversationLoading: Dispatch<SetStateAction<boolean>>;
   setThreadId: Dispatch<SetStateAction<string>>;
   setFinalReport: Dispatch<SetStateAction<FinalReportData | null>>;
@@ -255,6 +257,7 @@ export function UserThreads({
 
   const getConversationThread = async (threadId: string) => {
     setNodes([]);
+    setIsAnalyzing(false);
     setConversationLoading(true);
     setChatMessages([]);
     setHitlChoices(null);
@@ -265,7 +268,7 @@ export function UserThreads({
     try {
       const token = await getCookie(supabase); // Or retrieve from your Auth Context / Cookie
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads/${threadId}/`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/finance/threads/${threadId}`,
         {
           method: "GET",
           headers: {

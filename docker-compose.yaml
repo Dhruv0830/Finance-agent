@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./finance-agent-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./finance-agent-backend/.env
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./finance-agent-frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+        INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL}
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./finance-agent-frontend/.env.local
+    depends_on:
+      - backend
+    restart: unless-stopped

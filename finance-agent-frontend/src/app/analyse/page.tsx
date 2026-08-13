@@ -519,6 +519,7 @@ export default function AnalyseDashboard() {
             <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-1">
               <UserThreads
                 setChatMessages={setChatMessages}
+                setIsAnalyzing={setIsAnalyzing}
                 setActiveEndpoint={setActiveEndpoint}
                 setHasStarted={setHasStarted}
                 threadId={threadId}

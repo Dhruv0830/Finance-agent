@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Render dynamically injects $PORT at runtime (defaults to 10000)
+ENV PORT=10000
+EXPOSE 10000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Using 'exec' and shell string expansion allows Uvicorn to read Render's dynamic $PORT variable
+CMD exec uvicorn main:app --host 0.0.0.0 --port $PORT

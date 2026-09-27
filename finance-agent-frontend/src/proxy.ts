@@ -1,4 +1,3 @@
-// src/proxy.ts
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -9,7 +8,7 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // 1. Initialize Supabase Server Client inside proxy
+  // 1. Initialize Supabase Server Client
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -33,10 +32,14 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  // 2. Refresh & Fetch the active user session
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 2. Fetch the active user session with error catching
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user ?? null;
+  } catch (err) {
+    console.error("Auth check failed in proxy:", err);
+  }
 
   const { pathname } = request.nextUrl;
 
@@ -61,13 +64,9 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-// Ensure proxy runs on all relevant pages, ignoring static assets & API routes
+// Single clean matcher rule that covers all routes except static assets
 export const config = {
   matcher: [
-    "/",
-    "/login",
-    "/signup",
-    "/analyse/:path*",
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.jpg|auth/callback|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
